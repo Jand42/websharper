@@ -88,7 +88,10 @@ module internal ServerInferredOperators =
                     | -1 -> s
                     | q -> s.Substring(0, q)
             {
-                Segments = p.Split([| '/' |], System.StringSplitOptions.RemoveEmptyEntries) |> List.ofArray
+                Segments =
+                    p.Split([| '/' |], System.StringSplitOptions.RemoveEmptyEntries)
+                    |> Seq.map System.Uri.UnescapeDataString
+                    |> List.ofSeq
                 QueryArgs = r.Get
                 FormData = r.Post
                 Method = Some (r.Method.ToString())
@@ -184,13 +187,13 @@ module internal ServerInferredOperators =
                 match path.Segments with
                 | h :: t -> 
                     path.Segments <- t
-                    Some (decodeURIComponent h |> box)
+                    Some (box h)
                 | _ -> None
             IWrite = fun (w, value) ->
                 if isNull value then 
                     w.NextSegment().Append("null") |> ignore
                 else
-                    w.NextSegment().Append(encodeURIComponent (unbox value)) |> ignore
+                    w.NextSegment().Append(string value) |> ignore
         }
 
     let internal iChar : InferredRouter =
@@ -199,10 +202,10 @@ module internal ServerInferredOperators =
                 match path.Segments with
                 | h :: t when h.Length = 1 -> 
                     path.Segments <- t
-                    Some (char (decodeURIComponent h) |> box)
+                    Some (char h |> box)
                 | _ -> None
             IWrite = fun (w, value) ->
-                w.NextSegment().Append(encodeURIComponent (string value)) |> ignore
+                w.NextSegment().Append(string value) |> ignore
         }
 
     let inline iTryParse< ^T when ^T: (static member TryParse: string * byref< ^T> -> bool) and ^T: equality>() =

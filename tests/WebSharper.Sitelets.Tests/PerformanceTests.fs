@@ -82,6 +82,11 @@ module PerformanceTests =
         [
             URoot
             UString "hello"
+            UString """
+            {} ## @!~~ +++ fe öüóőúéáű
+            /\ `$%^&*  ->%20<-
+            .,;
+            """
             UTuple (1, "hi", true)
             UTupleQ (1, "hi", true)
             UNullable (System.Nullable())
