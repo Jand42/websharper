@@ -313,7 +313,7 @@ module internal ServerRouting =
                             | StringSegment _ -> None
                             | FieldSegment fName -> Some fName 
                         )
-                    ) |> Seq.distinct |> Array.ofSeq
+                    ) |> Seq.append allQueryFields |> Seq.distinct |> Array.ofSeq
                 let fieldIndexes =
                     routedFieldNames |> Seq.mapi (fun i n -> n, i) |> dict
                 let fieldRouters =
