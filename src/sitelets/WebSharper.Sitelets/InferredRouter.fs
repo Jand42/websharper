@@ -90,7 +90,7 @@ module internal ServerInferredOperators =
             {
                 Segments =
                     p.Split([| '/' |], System.StringSplitOptions.RemoveEmptyEntries)
-                    |> Seq.map System.Uri.UnescapeDataString
+                    |> Seq.map StringEncoding.read
                     |> List.ofSeq
                 QueryArgs = r.Get
                 FormData = r.Post
@@ -141,7 +141,7 @@ module internal ServerInferredOperators =
         member this.ToPath() =
             {
                 Segments = 
-                    this.PathWriter.ToString().Split('/') |> List.ofArray
+                    this.PathWriter.ToString().Split('/') |> Seq.map StringEncoding.read |> List.ofSeq
                 QueryArgs = 
                     let q = this.QueryWriter
                     if isNull q then Map.empty else Route.ParseQuery (q.ToString())
@@ -194,7 +194,7 @@ module internal ServerInferredOperators =
                 if isNull value then 
                     w.NextSegment().Append("null") |> ignore
                 else
-                    w.NextSegment().Append(System.Uri.EscapeDataString (unbox value)) |> ignore
+                    w.NextSegment().Append(StringEncoding.write (unbox value)) |> ignore
         }
 
     let internal iChar : InferredRouter =
@@ -206,7 +206,7 @@ module internal ServerInferredOperators =
                     Some (char h |> box)
                 | _ -> None
             IWrite = fun (w, value) ->
-                w.NextSegment().Append(System.Uri.EscapeDataString (string value)) |> ignore
+                w.NextSegment().Append(StringEncoding.write (string value)) |> ignore
         }
 
     let inline iTryParse< ^T when ^T: (static member TryParse: string * byref< ^T> -> bool) and ^T: equality>() =
@@ -277,7 +277,7 @@ module internal ServerInferredOperators =
             IWrite = fun (w, value) ->
                 let path = (unbox<string> value).Split('/')
                 for p in path do
-                    w.NextSegment().Append(System.Uri.EscapeDataString p) |> ignore
+                    w.NextSegment().Append(StringEncoding.write p) |> ignore
         }
 
     let iWildcardArray (itemType: System.Type) (item: InferredRouter) = 

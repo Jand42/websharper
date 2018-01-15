@@ -64,13 +64,138 @@ module ActionEncoding =
     let MissingQueryParameter (endpoint, queryParam) = ParseRequestResult.MissingQueryParameter(endpoint, queryParam)
     let MissingFormData (endpoint, formFieldName) = ParseRequestResult.MissingFormData(endpoint, formFieldName)
 
+module StringEncoding =
+
+    [<JavaScript>]
+    let isUnreserved isLast c =
+        match c with
+        | '-' | '_' -> true
+        | '.' -> not isLast
+        | c when c >= 'A' && c <= 'Z' -> true
+        | c when c >= 'a' && c <= 'z' -> true
+        | c when c >= '0' && c <= '9' -> true
+        | _ -> false
+    
+    let writeEscaped (w: System.Text.StringBuilder) isLast c =
+        let k = int c
+        if isUnreserved isLast c then w.Append c
+        elif k < 256 then w.AppendFormat("~{0:x2}", k)
+        else w.AppendFormat("~u{0:x4}", k)
+        |> ignore
+
+    [<JavaScript>]
+    let writeEscapedAsString isLast c =
+        let k = int c
+        if isUnreserved isLast c then string c
+        elif k < 256 then "~" + k.JS.ToString(16).PadLeft(2, '0')
+        else "~u" + k.JS.ToString(16).PadLeft(4, '0')
+
+    [<JavaScript>]
+    let write (s: string) = 
+        if IsClient then
+            s |> Seq.mapi (fun i c ->
+                writeEscapedAsString (i + 1 = s.Length) c
+            )
+            |> String.concat ""
+        else
+            let b = System.Text.StringBuilder()
+            s |> Seq.iteri (fun i c ->
+                writeEscaped b (i + 1 = s.Length) c)
+            string b
+
+    [<JavaScript>]
+    let inline ( ++ ) (a: int) (b: int) = (a <<< 4) + b
+
+    [<Literal>]
+    let EOF = -1
+
+    [<Literal>]
+    let ERROR = -2
+
+    let readEscaped (r: System.IO.TextReader) =
+        let hex x =
+            match x with
+            | x when x >= int '0' && x <= int '9' -> x - int '0'
+            | x when x >= int 'a' && x <= int 'f' -> x - int 'a' + 10
+            | x when x >= int 'A' && x <= int 'F' -> x - int 'A' + 10
+            | _ -> ERROR
+        match r.Read() with
+        | x when x = int '~' ->
+            match r.Read() with
+            | x when x = int 'u' ->
+                let a = r.Read()
+                let b = r.Read()
+                let c = r.Read()
+                let d = r.Read()
+                if a >= 0 && b >= 0 && c >= 0 && d >= 0 then
+                    hex a ++ hex b ++ hex c ++ hex d
+                else ERROR
+            | x ->
+                let y = r.Read()
+                if x >= 0 && y >= 0 then
+                    hex x ++ hex y
+                else ERROR
+        | x ->
+            x
+
+    [<JavaScript>]
+    let readEscapedFromChars (chars: int list) =
+        let mutable chars = chars
+        let read() =
+            match chars with
+            | [] -> -1
+            | h :: t ->
+                chars <- t
+                h
+        let hex x =
+            match x with
+            | x when x >= int '0' && x <= int '9' -> x - int '0'
+            | x when x >= int 'a' && x <= int 'f' -> x - int 'a' + 10
+            | x when x >= int 'A' && x <= int 'F' -> x - int 'A' + 10
+            | _ -> ERROR
+        match read() with
+        | x when x = int '~' ->
+            match read() with
+            | x when x = int 'u' ->
+                let a = read()
+                let b = read()
+                let c = read()
+                let d = read()
+                if a >= 0 && b >= 0 && c >= 0 && d >= 0 then
+                    hex a ++ hex b ++ hex c ++ hex d
+                else ERROR
+            | x ->
+                let y = read()
+                if x >= 0 && y >= 0 then
+                    hex x ++ hex y
+                else ERROR
+        | x ->
+            x
+        , chars
+
+    [<JavaScript>]
+    let read (s: string) = 
+        if IsClient then
+            let buf = ResizeArray()
+            let rec loop chars =
+                match readEscapedFromChars chars with
+                | ERROR, _ -> failwith ("failed to decode data string: " + s)
+                | EOF, _ -> buf |> String.concat ""
+                | x, chars -> 
+                    buf.Add(string (char x))
+                    loop chars
+            s |> Seq.map int |> List.ofSeq |> loop
+        else
+            let buf = System.Text.StringBuilder()
+            use i = new System.IO.StringReader(s)
+            let rec loop () =
+                match readEscaped i with
+                | ERROR -> failwith ("failed to decode data string: " + s)
+                | EOF -> string buf
+                | x -> buf.Append(char x) |> ignore; loop ()
+            loop ()
+
 type internal PathUtil =
-    static member EncodeURIComponent (x: string) =
-        System.Uri.EscapeDataString(x) 
-
-    static member DecodeURIComponent (x: string) =
-        System.Uri.UnescapeDataString(x) 
-
     static member WriteQuery q =
         let sb = StringBuilder 128
         let mutable start = true
@@ -101,18 +226,12 @@ type internal PathUtil =
                     start <- false
                 else 
                     sb.Append('&') |> ignore                    
-                sb.Append(k).Append('=').Append(PathUtil.EncodeURIComponent v) |> ignore
+                sb.Append(k).Append('=').Append(StringEncoding.write v) |> ignore
             )
         sb.ToString()
 
 [<Proxy(typeof<PathUtil>)>]
 type internal PathUtilProxy =
-    [<Inline "encodeURIComponent($x)">]
-    static member EncodeURIComponent (x: string) = X<string>
-
-    [<Inline "decodeURIComponent($x)">]
-    static member DecodeURIComponent (x: string) = X<string>
-
     static member Concat xs = 
         let sb = System.Collections.Generic.Queue()
         let mutable start = true
@@ -122,12 +241,12 @@ type internal PathUtilProxy =
                     start <- false
                 else 
                     sb.Enqueue("/") |> ignore                    
-                sb.Enqueue(PathUtil.EncodeURIComponent x) |> ignore
+                sb.Enqueue(StringEncoding.write x) |> ignore
         )
         sb |> System.String.Concat
 
     static member WriteQuery q =
-        q |> Map.toSeq |> Seq.map (fun (k, v) -> k + "=" + PathUtil.EncodeURIComponent v) |> String.concat "&"
+        q |> Map.toSeq |> Seq.map (fun (k, v) -> k + "=" + StringEncoding.write v) |> String.concat "&"
 
     static member WriteLink s q =
         let query = 
@@ -248,7 +367,7 @@ type Route =
         {
             Segments =
                 p.Split([| '/' |], System.StringSplitOptions.RemoveEmptyEntries)
-                |> Seq.map System.Uri.UnescapeDataString
+                |> Seq.map StringEncoding.read
                 |> List.ofSeq
             QueryArgs = r.Get.ToList() |> Map.ofList
             FormData = r.Post.ToList() |> Map.ofList
@@ -971,7 +1090,7 @@ module IRouter =
     let private path (uri: Uri) =
         if uri.IsAbsoluteUri
         then uri.AbsolutePath
-        else Uri.UnescapeDataString(uri.OriginalString) |> joinWithSlash "/"
+        else uri.OriginalString |> joinWithSlash "/"
         
     let private trimFinalSlash (s: string) =
         match s.TrimEnd('/') with
