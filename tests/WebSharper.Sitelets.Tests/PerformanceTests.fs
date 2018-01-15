@@ -167,8 +167,7 @@ module PerformanceTests =
     [<Remote>]
     let GetExtraTestValues() =
         ExtraTestValues |> Seq.map (fun (v, p) ->
-            let l = ShiftedRouter.Link v 
-            v, p, ShiftedRouter.Link v, Router.Parse ShiftedRouter (Route.FromUrl l)
+            v, p, Router.Parse ShiftedRouter (Route.FromUrl p)
         ) |> Array.ofSeq |> async.Return
                
 module CombinatorTests =
