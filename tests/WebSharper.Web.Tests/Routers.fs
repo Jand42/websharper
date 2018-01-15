@@ -92,6 +92,11 @@ module PerformanceTests =
             USubAction Sub1
             USubAction (Sub2 "x")
             UString "hello"
+            UString """
+            {} ## @!~~ +++ fe öüóőúéáű
+            /\ `$%^&*  ->%20<-
+            .,;
+            """
             UTuple (1, "hi", true)
             UTupleQ (1, "hi", true)
             UNullable (System.Nullable())
@@ -111,6 +116,11 @@ module PerformanceTests =
             UJsonInput { A = "hello"; B = 123; C = false }
             UJsonInt 4
             UFormData "hello"
+            UFormData """
+            {} ## @!~~ +++ fe öüóőúéáű
+            /\ `$%^&*  ->%20<-
+            .,;
+            """
             UMultiFormData { Text = "hello"; Id = None; Flag = true }
             UMultiFormData { Text = "hello"; Id = Some 2; Flag = false }
             UMultiple

@@ -65,6 +65,12 @@ module ActionEncoding =
     let MissingFormData (endpoint, formFieldName) = ParseRequestResult.MissingFormData(endpoint, formFieldName)
 
 type internal PathUtil =
+    static member EncodeURIComponent (x: string) =
+        System.Uri.EscapeDataString(x) 
+
+    static member DecodeURIComponent (x: string) =
+        System.Uri.UnescapeDataString(x) 
+
     static member WriteQuery q =
         let sb = StringBuilder 128
         let mutable start = true
@@ -73,7 +79,7 @@ type internal PathUtil =
                 start <- false
             else 
                 sb.Append('&') |> ignore                    
-            sb.Append(k).Append('=').Append(v) |> ignore
+            sb.Append(k).Append('=').Append(System.Uri.EscapeDataString v) |> ignore
         )
         sb.ToString()
 
@@ -84,7 +90,7 @@ type internal PathUtil =
         else
             s |> List.iter (fun x ->
                 if not (System.String.IsNullOrEmpty x) then
-                    sb.Append('/').Append(x) |> ignore
+                    sb.Append('/').Append(System.Uri.EscapeDataString x) |> ignore
             )
         if Map.isEmpty q then () 
         else 
@@ -95,12 +101,18 @@ type internal PathUtil =
                     start <- false
                 else 
                     sb.Append('&') |> ignore                    
-                sb.Append(k).Append('=').Append(v) |> ignore
+                sb.Append(k).Append('=').Append(PathUtil.EncodeURIComponent v) |> ignore
             )
         sb.ToString()
 
 [<Proxy(typeof<PathUtil>)>]
 type internal PathUtilProxy =
+    [<Inline "encodeURIComponent($x)">]
+    static member EncodeURIComponent (x: string) = X<string>
+
+    [<Inline "decodeURIComponent($x)">]
+    static member DecodeURIComponent (x: string) = X<string>
+
     static member Concat xs = 
         let sb = System.Collections.Generic.Queue()
         let mutable start = true
@@ -110,12 +122,12 @@ type internal PathUtilProxy =
                     start <- false
                 else 
                     sb.Enqueue("/") |> ignore                    
-                sb.Enqueue(x) |> ignore
+                sb.Enqueue(PathUtil.EncodeURIComponent x) |> ignore
         )
         sb |> System.String.Concat
 
     static member WriteQuery q =
-        q |> Map.toSeq |> Seq.map (fun (k, v) -> k + "=" + v) |> String.concat "&"
+        q |> Map.toSeq |> Seq.map (fun (k, v) -> k + "=" + PathUtil.EncodeURIComponent v) |> String.concat "&"
 
     static member WriteLink s q =
         let query = 
@@ -234,7 +246,10 @@ type Route =
                 | -1 -> s
                 | q -> s.Substring(0, q)
         {
-            Segments = p.Split([| '/' |], System.StringSplitOptions.RemoveEmptyEntries) |> List.ofArray
+            Segments =
+                p.Split([| '/' |], System.StringSplitOptions.RemoveEmptyEntries)
+                |> Seq.map System.Uri.UnescapeDataString
+                |> List.ofSeq
             QueryArgs = r.Get.ToList() |> Map.ofList
             FormData = r.Post.ToList() |> Map.ofList
             Method = Some (r.Method.ToString())
@@ -577,7 +592,6 @@ module Router =
                 settings.Error <- fun _ _ msg -> err (exn msg)
                 // todo: cancellation
                 let url = path.ToLink()
-                //Console.Log("ajax call", endpoint, path, url, settings)
                 JQuery.Ajax(url, settings) |> ignore
             )
         | _ -> 
@@ -1004,24 +1018,16 @@ module RouterOperators =
     /// Parse/write a specific string.
     let r name : Router = Router.FromString name
 
-    [<Inline "encodeURIComponent($x)">]
-    let inline internal encodeURIComponent (x: string) =
-        System.Uri.EscapeDataString(x) 
-
-    [<Inline "decodeURIComponent($x)">]
-    let inline internal decodeURIComponent (x: string) =
-        System.Uri.UnescapeDataString(x) 
-
     /// Parse/write a string using URL encode/decode.
     let rString : Router<string> =
         {
             Parse = fun path ->
                 match path.Segments with
                 | h :: t -> 
-                    Seq.singleton ({ path with Segments = t }, decodeURIComponent h)
+                    Seq.singleton ({ path with Segments = t }, h)
                 | _ -> Seq.empty
             Write = fun value ->
-                Some (Seq.singleton (Route.Segment (if isNull value then "null" else encodeURIComponent value)))
+                Some (Seq.singleton (Route.Segment (if isNull value then "null" else value)))
         }
 
     /// Parse/write a char.
@@ -1030,10 +1036,10 @@ module RouterOperators =
             Parse = fun path ->
                 match path.Segments with
                 | h :: t when h.Length = 1 -> 
-                    Seq.singleton ({ path with Segments = t }, char (decodeURIComponent h))
+                    Seq.singleton ({ path with Segments = t }, char h)
                 | _ -> Seq.empty
             Write = fun value ->
-                Some (Seq.singleton (Route.Segment (encodeURIComponent (string value))))
+                Some (Seq.singleton (Route.Segment (string value)))
         }
 
     [<Inline>]
@@ -1099,7 +1105,8 @@ module RouterOperators =
                 let s = path.Segments |> String.concat "/"
                 Seq.singleton ({ path with Segments = [] }, s)
             Write = fun value ->
-                Some (Seq.singleton (Route.Segment value))
+                let path = value.Split('/')
+                Some (Seq.singleton (Route.Segment (List.ofArray path)))
         }
     
     let rWildcardArray (item: Router<'A>) : Router<'A[]> =
