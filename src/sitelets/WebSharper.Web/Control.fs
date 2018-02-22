@@ -229,40 +229,27 @@ module ClientSideInternals =
             findArgs (Set.add v2.Name env) setArg q2
         | _ -> ()
     
-    let internal compileClientSide (meta: M.Info) (reqs: list<M.Node>) (q: Expr) : (obj[] * _) =
-        let rec compile (reqs: list<M.Node>) (q: Expr) =
-            match getLocation q with
-            | Some p ->
-                match meta.Quotations.TryGetValue(p) with
-                | false, _ ->
-                    let ex =
-                        meta.Quotations.Keys
-                        |> Seq.map (sprintf "  %O")
-                        |> String.concat "\n"
-                    failwithf "Failed to find compiled quotation at position %O\nExisting ones:\n%s" p ex
-                | true, (declType, meth, argNames) ->
-                    match meta.Classes.TryGetValue declType with
-                    | false, _ -> failwithf "Error in ClientSide: Couldn't find JavaScript address for method %s.%s" declType.Value.FullName meth.Value.MethodName
-                    | true, c ->
-                        let argIndices = Map (argNames |> List.mapi (fun i x -> x, i))
-                        let args = Array.create argNames.Length null
-                        let reqs = ref (M.MethodNode (declType, meth) :: M.TypeNode declType :: reqs)
-                        let setArg (name: string) (value: obj) =
-                            let i = argIndices.[name]
-                            if isNull args.[i] then
-                                args.[i] <-
-                                    match value with
-                                    | :? Expr as q ->
-                                        failwith "Error in ClientSide: Spliced expressions are not allowed in InlineControl"
-                                    | value ->
-                                        let typ = value.GetType ()
-                                        reqs := M.TypeNode (WebSharper.Core.AST.Reflection.ReadTypeDefinition typ) :: !reqs
-                                        value
-                        if not (List.isEmpty argNames) then
-                            findArgs Set.empty setArg q
-                        args, !reqs
-            | None -> failwithf "Failed to find location of quotation: %A" q
-        compile reqs q 
+    let internal compileClientSide (meta: M.Info) (declType: AST.TypeDefinition) (meth: AST.Method) argNames (q: Expr) : (obj[] * _) =
+        match meta.Classes.TryGetValue declType with
+        | false, _ -> failwithf "Error in ClientSide: Couldn't find JavaScript address for method %s.%s" declType.Value.FullName meth.Value.MethodName
+        | true, c ->
+            let argIndices = Map (argNames |> List.mapi (fun i x -> x, i))
+            let args = Array.create argNames.Length null
+            let reqs = ref [ M.MethodNode (declType, meth) ]
+            let setArg (name: string) (value: obj) =
+                let i = argIndices.[name]
+                if isNull args.[i] then
+                    args.[i] <-
+                        match value with
+                        | :? Expr as q ->
+                            failwith "Error in ClientSide: Spliced expressions are not allowed in InlineControl"
+                        | value ->
+                            let typ = value.GetType ()
+                            reqs := M.TypeNode (WebSharper.Core.AST.Reflection.ReadTypeDefinition typ) :: !reqs
+                            value
+            if not (List.isEmpty argNames) then
+                findArgs Set.empty setArg q
+            args, !reqs
 
     type private FSV = Reflection.FSharpValue
 
@@ -318,6 +305,9 @@ type InlineControl<'T when 'T :> IControlBody>(elt: Expr<'T>) =
     [<System.NonSerialized>]
     let elt = elt
 
+    [<System.NonSerialized>]
+    let asm = System.Reflection.Assembly.GetCallingAssembly().GetName().Name
+
     let mutable args = [||]
     let mutable funcName = [||]
 
@@ -332,9 +322,9 @@ type InlineControl<'T when 'T :> IControlBody>(elt: Expr<'T>) =
                 match getLocation elt with
                 | None -> failwith "Failed to find location of quotation"
                 | Some p ->
-                    match meta.Quotations.TryGetValue p with
-                    | true, (ty, m, _) ->
-                        let argVals, deps = compileClientSide meta [] elt
+                    match meta.Quotations.TryGetValue((asm, p)) with
+                    | true, (ty, m, a) ->
+                        let argVals, deps = compileClientSide meta ty m a elt
                         args <- argVals
                         ty, m, deps
                     | false, _ ->

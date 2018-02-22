@@ -165,7 +165,7 @@ type Compilation(meta: Info, ?hasGraph) =
                     member this.Macros = cls.Macros
                 }
 
-        member this.GetQuotation(pos) = quotations.TryFind pos
+        member this.GetQuotation(asm, pos) = quotations.TryFind((asm, pos))
 
         member this.GetJavaScriptClasses() = classes.Keys |> List.ofSeq
         member this.GetTypeAttributes(typ) = this.LookupTypeAttributes typ
@@ -1019,7 +1019,7 @@ type Compilation(meta: Info, ?hasGraph) =
                         | N.Quotation (pos, argNames) -> 
                             match m with 
                             | M.Method (mdef, _) ->
-                                quotations.Add(pos, (typ, mdef, argNames))
+                                quotations.Add((this.AssemblyName, pos), (typ, mdef, argNames))
                             | _ -> failwith "quoted javascript code must be inside a method"
                             sn, Some true, false 
                         | N.Remote _
