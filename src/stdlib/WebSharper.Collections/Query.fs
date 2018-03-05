@@ -26,6 +26,7 @@ open System.Collections
 open System.Collections.Generic
 open WebSharper.Core
 open WebSharper.JavaScript
+open FSharp.Quotations
 
 open FSharp.Linq
 
@@ -42,15 +43,17 @@ type internal QueryBuilderProxy() =
         Seq.forall predicate source.Source
 
     [<Inline>]
-    member this.AverageBy(source: QuerySource<'T, 'Q>, projection: 'T -> 'TValue) =
+    member inline this.AverageBy
+            (source: QuerySource<'T, 'Q>, projection: 'T -> ^Value) =
         Seq.averageBy projection source.Source
 
-    member this.AverageByNullable(source: QuerySource<'T, 'Q>, projection: 'T -> Nullable<'TValue>) =
-        source.Source 
-        |> Seq.averageBy (fun x -> 
-            let y = projection x 
-            if y.HasValue then y.Value else As 0
-        )
+    member inline this.AverageByNullable 
+            (source: QuerySource<'T, 'Q>, projection: 'T -> Nullable< ^TValue>) =
+        let filtered =
+            source.Source |> Seq.choose (fun x ->
+                Option.ofNullable (projection x) 
+            ) |> Array.ofSeq
+        if filtered.Length = 0 then Nullable() else Nullable(Array.average filtered) 
 
     [<Inline>]
     member this.Contains(source: QuerySource<'T, 'Q>, key: 'T) =
@@ -62,7 +65,7 @@ type internal QueryBuilderProxy() =
 
     [<Inline>]
     member this.Distinct(source: QuerySource<'T, 'Q>) =
-        Seq.distinct source.Source |> QuerySource
+        Seq.distinct source.Source |> QuerySource<'T, 'Q>
 
     [<Inline>]
     member this.ExactlyOne(source: QuerySource<'T, 'Q>) =
@@ -81,28 +84,29 @@ type internal QueryBuilderProxy() =
         Seq.find predicate source.Source
 
     member this.For(source: QuerySource<'T, 'Q>, body: 'T -> QuerySource<'TResult, 'Q2>) =
-        Seq.collect (fun x -> (body x).Source) source.Source |> QuerySource
+        Seq.collect (fun x -> (body x).Source) source.Source |> QuerySource<'TResult, 'Q>
      
     [<Inline>]
     member this.GroupBy(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
-        source.Source.GroupBy(fun x -> keySelector x) |> QuerySource
+        source.Source.GroupBy(fun x -> keySelector x) |> QuerySource<IGrouping<'TKey, 'T>, 'Q>
 
+    [<Inline>]
     member this.GroupJoin
       (
         outerSource: QuerySource<'TOuter, 'Q>, innerSource: QuerySource<'TInner, 'Q>, 
         outerKeySelector: 'TOuter -> 'TKey, innerKeySelector: 'TInner -> 'TKey,
-        resultSelector: 'TOuter -> 'TInner -> 'TResult
+        resultSelector: 'TOuter -> seq<'TInner> -> 'TResult
       ) =
         outerSource.Source.GroupJoin(
             innerSource.Source, 
             (fun x -> outerKeySelector x), 
             (fun x -> innerKeySelector x), 
             (fun x y -> resultSelector x y)
-        ) |> QuerySource
+        ) |> QuerySource<'TResult, 'Q>
 
     [<Inline>]
-    member this.GroupValBy(source: QuerySource<'T, 'Q>, resultSelector: 'T -> 'TValue, keySelector: 'T -> 'TKey) =
-        source.Source.GroupBy(fun x -> keySelector x, fun x -> resultSelector x) |> QuerySource
+    member this.GroupValBy<'T, 'TKey, 'TValue, 'Q>(source: QuerySource<'T, 'Q>, resultSelector: 'T -> 'TValue, keySelector: 'T -> 'TKey) =
+        source.Source.GroupBy((fun x -> keySelector x), (fun x -> resultSelector x)) |> QuerySource<IGrouping<'TKey, 'TValue>, 'Q>
 
     [<Inline>]
     member this.Head(source: QuerySource<'T, 'Q>) =
@@ -112,6 +116,7 @@ type internal QueryBuilderProxy() =
     member this.HeadOrDefault(source: QuerySource<'T, 'Q>) =
         source.Source.FirstOrDefault()
     
+    [<Inline>]
     member this.Join
       (
         outerSource: QuerySource<'TOuter, 'Q>, innerSource: QuerySource<'TInner, 'Q>, 
@@ -123,15 +128,150 @@ type internal QueryBuilderProxy() =
             (fun x -> outerKeySelector x), 
             (fun x -> innerKeySelector x), 
             (fun x y -> resultSelector x y)
-        ) |> QuerySource
+        ) |> QuerySource<'TResult, 'Q>
 
     [<Inline>]
     member this.Last(source: QuerySource<'T, 'Q>) =
-        Seq.tail source.Source
+        Seq.last source.Source
  
     [<Inline>]
     member this.LastOrDefault(source: QuerySource<'T, 'Q>) =
         source.Source.LastOrDefault()
+
+    [<Inline>]
+    member this.LeftOuterJoin
+      (
+        outerSource: QuerySource<'TOuter, 'Q>, innerSource: QuerySource<'TInner, 'Q>, 
+        outerKeySelector: 'TOuter -> 'TKey, innerKeySelector: 'TInner -> 'TKey,
+        resultSelector: 'TOuter -> seq<'TInner> -> 'TResult
+      ) =
+        outerSource.Source.GroupJoin(
+            innerSource.Source, 
+            (fun x -> outerKeySelector x), 
+            (fun x -> innerKeySelector x), 
+            (fun x y -> resultSelector x (y.DefaultIfEmpty()))
+        ) |> QuerySource<'TResult, 'Q>
+
+    [<Inline>]
+    member this.MaxBy(source: QuerySource<'T, 'Q>, valueSelector: 'T -> 'TValue) =
+        source.Source.Max(fun x -> valueSelector x)
+    
+    [<Inline>]
+    member this.MaxByNullable(source: QuerySource<'T, 'Q>, valueSelector: 'T -> Nullable<'TValue>) =
+        source.Source.Max(fun x -> valueSelector x)
+
+    [<Inline>]
+    member this.MinBy(source: QuerySource<'T, 'Q>, valueSelector: 'T -> 'TValue) =
+        source.Source.Min(fun x -> valueSelector x)
+    
+    [<Inline>]
+    member this.MinByNullable(source: QuerySource<'T, 'Q>, valueSelector: 'T -> Nullable<'TValue>) =
+        source.Source.Min(fun x -> valueSelector x)
+
+    [<Inline>]
+    member this.Nth(source: QuerySource<'T, 'Q>, index: int) =
+        Seq.item index source.Source
+
+    [<Inline>]
+    member this.Quote(q: Expr<'T>) = q
+
+    [<Inline>]
+    member this.Run(q: Expr<QuerySource<'T, IQueryable>>) =
+        (As<QuerySource<'T, obj>> q).Source |> As<IQueryable<'T>>      
+           
+    [<Inline>]
+    member this.Select(source: QuerySource<'T, 'Q>, projection: 'T -> 'TResult) =
+        source.Source |> Seq.map projection |> QuerySource<'TResult, 'Q>
+
+    [<Inline>]
+    member this.Skip(source: QuerySource<'T, 'Q>, count: int) =
+        source.Source.Skip(count) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.SkipWhile(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
+        source.Source.SkipWhile(fun x -> predicate x) |> QuerySource<'T, 'Q>
+    
+    [<Inline>]
+    member this.SortBy(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
+        source.Source.OrderBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.SortByDescending(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
+        source.Source.OrderByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.SortByNullable(source: QuerySource<'T, 'Q>, keySelector: 'T -> Nullable<'TKey>) =
+        source.Source.OrderBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.SortByNullableDescending(source: QuerySource<'T, 'Q>, keySelector: 'T -> Nullable<'TKey>) =
+        source.Source.OrderByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.Source(source: seq<'T>) = 
+        QuerySource<'T,  System.Collections.IEnumerable>(source)
+
+    [<Inline>]
+    member this.Source(source: IQueryable<'T>) = 
+        QuerySource<'T, 'Q>(source)
+
+    [<Inline>]                                                              
+    member inline this.SumBy(source: QuerySource<'T, 'Q>, projection: 'T -> ^TValue) =
+        Seq.sumBy projection source.Source
+
+    member inline this.SumByNullable(source: QuerySource<'T, 'Q>, projection: 'T -> Nullable<'TValue>) =
+        let filtered =
+            source.Source |> Seq.choose (fun x ->
+                Option.ofNullable (projection x) 
+            ) |> Array.ofSeq
+        if filtered.Length = 0 then Nullable() else Nullable(Array.sum filtered) 
+
+    [<Inline>]
+    member this.Take(source: QuerySource<'T, 'Q>, count: int) =
+        source.Source.Take(count) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.TakeWhile(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
+        source.Source.TakeWhile(fun x -> predicate x) |> QuerySource<'T, 'Q>
+    
+    member this.CheckThenBySource(source: IEnumerable<'T>) =
+        match source with
+        | :? IOrderedEnumerable<'T> as e ->
+            e
+        | _ ->
+            failwith "'thenBy' and 'thenByDescending' may only be used with an ordered input"
+
+    [<Inline>]
+    member this.ThenBy(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
+        this.CheckThenBySource(source.Source).ThenBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.ThenByDescending(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
+        this.CheckThenBySource(source.Source).ThenByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.ThenByNullable(source: QuerySource<'T, 'Q>, keySelector: 'T -> Nullable<'TKey>) =
+        this.CheckThenBySource(source.Source).ThenBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.ThenByNullableDescending(source: QuerySource<'T, 'Q>, keySelector: 'T -> Nullable<'TKey>) =
+        this.CheckThenBySource(source.Source).ThenByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.Where(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
+        source.Source.Where(fun x -> predicate x) |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.Yield(value: 'T) =
+        Seq.singleton value |> QuerySource<'T, 'Q>
+
+    [<Inline>]
+    member this.YieldFrom(computation: QuerySource<'T, 'Q>) =
+        computation
+    
+    [<Inline>]
+    member this.Zero() =
+        Seq.empty |> QuerySource<'T, 'Q>
 
 [<WebSharper.Proxy
     "Microsoft.FSharp.Core.ExtraTopLevelOperators, \
