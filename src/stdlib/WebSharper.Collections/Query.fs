@@ -273,10 +273,21 @@ type internal QueryBuilderProxy() =
     member this.Zero() =
         Seq.empty |> QuerySource<'T, 'Q>
 
-[<WebSharper.Proxy
-    "Microsoft.FSharp.Core.ExtraTopLevelOperators, \
-     FSharp.Core, Culture=neutral, \
-     PublicKeyToken=b03f5f7f11d50a3a">]
+[<WebSharper.Proxy "Microsoft.FSharp.Core.ExtraTopLevelOperators, FSharp.Core">]
 module private ExtraTopLevelOperatorsQueryProxy =
     
     let query = QueryBuilderProxy()
+
+[<WebSharper.Proxy "Microsoft.FSharp.Linq.QueryRunExtensions.HighPriority, FSharp.Core">]
+module HighPriorityProxy =                          
+    
+    [<Inline>]
+    let RunQueryAsEnumerable (this: QueryBuilder) (q: Expr<QuerySource<'T, IEnumerable>>) =
+        (As<QuerySource<'T, IEnumerable>> q).Source   
+
+[<WebSharper.Proxy "Microsoft.FSharp.Linq.QueryRunExtensions.LowPriority, FSharp.Core">]
+module LowPriorityProxy =                          
+    
+    [<Inline>]
+    let RunQueryAsValue (this: QueryBuilder) (q: Expr<'T>) =
+        As<'T> q
