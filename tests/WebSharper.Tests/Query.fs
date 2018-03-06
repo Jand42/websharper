@@ -20,8 +20,10 @@
 
 module WebSharper.Tests.Query
 
+open System
 open WebSharper
 open WebSharper.Testing
+open FSharp.Linq
 
 [<JavaScript>]
 let Tests =
@@ -36,5 +38,59 @@ let Tests =
                     all (x > 0)
                 }
             isTrue q 
+        }
+
+        Test "AverageBy" {
+            let q =
+                query {
+                    for x in s do
+                    averageBy (float x)
+                }
+            equal q 5.5
+        }
+
+        Test "AverageByNullable" {
+            let n = Seq.singleton (Nullable()) 
+            let s = s |> Seq.map Nullable |> Seq.append n
+            let q =
+                query {
+                    for x in s do
+                    averageByNullable (Nullable.float x)
+                }
+            equal q (Nullable 5.5)
+            let q2 =
+                query {
+                    for x in n do
+                    averageByNullable (Nullable.float x)
+                }
+            equal q2 (Nullable())
+        }
+
+        Test "Contains" {
+            let q =
+                query {
+                    for x in s do
+                    contains 11
+                }
+            isFalse q
+        }
+
+        Test "Count" {
+            let q =
+                query {
+                    for x in s do
+                    count
+                }
+            equal q 10
+        }
+
+        Test "Distinct" {
+            let s2 = s |> Seq.append (Seq.singleton 1) 
+            let q =
+                query {
+                    for x in s2 do
+                    distinct
+                }
+            equal (Array.ofSeq q) (Array.ofSeq s)
         }
     }
