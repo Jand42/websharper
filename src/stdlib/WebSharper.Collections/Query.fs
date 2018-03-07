@@ -37,6 +37,7 @@ type internal QuerySourceProxy<'T, 'Q> [<Inline "$source">] (source: IEnumerable
     member this.Source = source
                                 
 [<Proxy(typeof<QueryBuilder>)>]
+[<Name "WebSharper.Query">]
 type internal QueryBuilderProxy() =
     [<Inline>]
     member this.All(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
@@ -47,13 +48,17 @@ type internal QueryBuilderProxy() =
             (source: QuerySource<'T, 'Q>, projection: 'T -> ^Value) =
         Seq.averageBy projection source.Source
 
-    member inline this.AverageByNullable 
+    [<Name "averageByNullable">]
+    static member inline AverageByNullableImpl 
             (source: QuerySource<'T, 'Q>, projection: 'T -> Nullable< ^TValue>) =
         let filtered =
             source.Source |> Seq.choose (fun x ->
                 Option.ofNullable (projection x) 
             ) |> Array.ofSeq
         if filtered.Length = 0 then Nullable() else Nullable(Array.average filtered) 
+
+    [<Inline>]
+    member inline this.AverageByNullable (source, projection) = QueryBuilderProxy.AverageByNullableImpl(source, projection)
 
     [<Inline>]
     member this.Contains(source: QuerySource<'T, 'Q>, key: 'T) =
@@ -83,6 +88,7 @@ type internal QueryBuilderProxy() =
     member this.Find(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
         Seq.find predicate source.Source
 
+    [<Inline>]
     member this.For(source: QuerySource<'T, 'Q>, body: 'T -> QuerySource<'TResult, 'Q2>) =
         Seq.collect (fun x -> (body x).Source) source.Source |> QuerySource<'TResult, 'Q>
      
@@ -219,12 +225,16 @@ type internal QueryBuilderProxy() =
     member inline this.SumBy(source: QuerySource<'T, 'Q>, projection: 'T -> ^TValue) =
         Seq.sumBy projection source.Source
 
-    member inline this.SumByNullable(source: QuerySource<'T, 'Q>, projection: 'T -> Nullable<'TValue>) =
+    [<Name "sumByNullable">]                                                              
+    static member inline SumByNullableImpl(source: QuerySource<'T, 'Q>, projection: 'T -> Nullable<'TValue>) =
         let filtered =
             source.Source |> Seq.choose (fun x ->
                 Option.ofNullable (projection x) 
             ) |> Array.ofSeq
         if filtered.Length = 0 then Nullable() else Nullable(Array.sum filtered) 
+
+    [<Inline>]
+    member inline this.SumByNullable(source, projection) = QueryBuilderProxy.SumByNullableImpl(source, projection)
 
     [<Inline>]
     member this.Take(source: QuerySource<'T, 'Q>, count: int) =
@@ -234,7 +244,7 @@ type internal QueryBuilderProxy() =
     member this.TakeWhile(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
         source.Source.TakeWhile(fun x -> predicate x) |> QuerySource<'T, 'Q>
     
-    member this.CheckThenBySource(source: IEnumerable<'T>) =
+    static member CheckThenBySource(source: IEnumerable<'T>) =
         match source with
         | :? IOrderedEnumerable<'T> as e ->
             e
@@ -243,19 +253,19 @@ type internal QueryBuilderProxy() =
 
     [<Inline>]
     member this.ThenBy(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
-        this.CheckThenBySource(source.Source).ThenBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+        QueryBuilderProxy.CheckThenBySource(source.Source).ThenBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
 
     [<Inline>]
     member this.ThenByDescending(source: QuerySource<'T, 'Q>, keySelector: 'T -> 'TKey) =
-        this.CheckThenBySource(source.Source).ThenByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+        QueryBuilderProxy.CheckThenBySource(source.Source).ThenByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
 
     [<Inline>]
     member this.ThenByNullable(source: QuerySource<'T, 'Q>, keySelector: 'T -> Nullable<'TKey>) =
-        this.CheckThenBySource(source.Source).ThenBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+        QueryBuilderProxy.CheckThenBySource(source.Source).ThenBy(fun x -> keySelector x) |> QuerySource<'T, 'Q>
 
     [<Inline>]
     member this.ThenByNullableDescending(source: QuerySource<'T, 'Q>, keySelector: 'T -> Nullable<'TKey>) =
-        this.CheckThenBySource(source.Source).ThenByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
+        QueryBuilderProxy.CheckThenBySource(source.Source).ThenByDescending(fun x -> keySelector x) |> QuerySource<'T, 'Q>
 
     [<Inline>]
     member this.Where(source: QuerySource<'T, 'Q>, predicate: 'T -> bool) =
@@ -276,7 +286,8 @@ type internal QueryBuilderProxy() =
 [<WebSharper.Proxy "Microsoft.FSharp.Core.ExtraTopLevelOperators, FSharp.Core">]
 module private ExtraTopLevelOperatorsQueryProxy =
     
-    let query = QueryBuilderProxy()
+    [<Inline "null">]
+    let query = query
 
 [<WebSharper.Proxy "Microsoft.FSharp.Linq.QueryRunExtensions.HighPriority, FSharp.Core">]
 module HighPriorityProxy =                          
