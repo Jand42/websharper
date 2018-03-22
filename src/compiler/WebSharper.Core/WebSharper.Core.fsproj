@@ -19,9 +19,12 @@
     <None Include="genAST.fsx" />
     <Compile Include="ASTHelpers.fs" />
     <Compile Include="Attributes.fs" />
+    <Compile Include="EmbeddedResources.fs" />
     <Compile Include="Metadata.fs" />
     <Compile Include="Resources.fsi" />
     <Compile Include="Resources.fs" />
+    <Compile Include="FileSystem.fsi" />
+    <Compile Include="FileSystem.fs" />
     <Compile Include="Macro.fs" />
     <Compile Include="Macros.fsi" />
     <Compile Include="Macros.fs" />
@@ -30,6 +33,7 @@
     <Compile Include="Json.fs" />
     <Compile Include="Remoting.fsi" />
     <Compile Include="Remoting.fs" />
+    <Compile Include="Unpacking.fs" />
     <Compile Include="Interop.fs" />
     <None Include="genInterop.fsx" />
     <None Include="paket.references" />

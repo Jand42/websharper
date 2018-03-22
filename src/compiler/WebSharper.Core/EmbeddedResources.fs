@@ -1,4 +1,4 @@
-// $begin{copyright}
+﻿// $begin{copyright}
 //
 // This file is part of WebSharper
 //
@@ -18,10 +18,9 @@
 //
 // $end{copyright}
 
-namespace WebSharper.Compiler
+namespace WebSharper.Core
 
-[<AutoOpen>]
-module internal Constants =
+module EmbeddedResourceNames =
 
     [<Literal>]
     let EMBEDDED_METADATA = "WebSharper.meta"

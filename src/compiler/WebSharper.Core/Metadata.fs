@@ -480,24 +480,25 @@ type ICompilation =
     abstract AddWarning : option<SourcePos> * string -> unit 
               
 module IO =
+    open EmbeddedResourceNames
+    
     module B = Binary
 
+    let EncodingProvider = B.EncodingProvider.Create()
+    let CurrentVersion = "4.2"
+    
     let MetadataEncoding =
         try
-            let eP = B.EncodingProvider.Create()
-            eP.DeriveEncoding typeof<Info>
+            EncodingProvider.DeriveEncoding(typeof<Info>, CurrentVersion)
         with B.NoEncodingException t ->
             failwithf "Failed to create binary encoder for type %s" t.FullName
 
-    let CurrentVersion = "4.2"
-
-    let Decode (stream: System.IO.Stream) = MetadataEncoding.Decode(stream, CurrentVersion) :?> Info   
-    let Encode stream (comp: Info) = MetadataEncoding.Encode(stream, comp, CurrentVersion)
+    let Decode (stream: System.IO.Stream) = MetadataEncoding.Decode(stream) :?> Info   
+    let Encode stream (comp: Info) = MetadataEncoding.Encode(stream, comp)
 
     let LoadReflected(a: System.Reflection.Assembly) =
         if a.FullName.StartsWith "System" then None else
-            let n = "WebSharper.meta"
-            if Array.exists ((=) n) (a.GetManifestResourceNames()) then
+            if a.GetManifestResourceNames() |> Array.contains EMBEDDED_METADATA then
                 use s = a.GetManifestResourceStream n
                 try
                     Some (Decode s)

@@ -18,7 +18,7 @@
 //
 // $end{copyright}
 
-module WebSharper.Compiler.FileSystem
+module WebSharper.Core.FileSystem
 
 open System.IO
 open System.Text

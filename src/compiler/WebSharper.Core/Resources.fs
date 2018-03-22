@@ -23,6 +23,7 @@ module WebSharper.Core.Resources
 open System
 open System.IO
 open System.Reflection
+open EmbeddedResourceNames
 
 #if NET461 // ASP.NET: HtmlTextWriter
 
@@ -244,9 +245,8 @@ let AllReferencedAssemblies =
         let name = asm.GetName().Name
         match d.TryGetValue(name) with
         | true, prevAsm ->
-            let n = "WebSharper.meta"
-            if Array.exists ((=) n) (asm.GetManifestResourceNames()) && 
-                prevAsm.GetName().Version <> asm.GetName().Version
+            if asm.GetManifestResourceNames() |> Array.contains EMBEDDED_METADATA 
+                && prevAsm.GetName().Version <> asm.GetName().Version
             then
                 failwithf "WebSharper assembly referenced with multiple times with different versions: %s" name
         | _ ->

@@ -620,9 +620,9 @@ type InterningWriter(memory: System.IO.MemoryStream) =
         memory.WriteTo output
 
 [<Sealed>]
-type Encoding(enc: Encoder) =
+type Encoding(enc: Encoder, ?version: string, ?header: Encoder) =
 
-    member this.Decode(stream: System.IO.Stream, ?version: string) : obj =
+    member this.Decode(stream: System.IO.Stream, ?headerCont: obj -> unit) : obj =
         let mode = System.IO.Compression.CompressionMode.Decompress
         use stream = new System.IO.Compression.GZipStream(stream, mode)
         use reader = new System.IO.BinaryReader(stream)
@@ -632,13 +632,11 @@ type Encoding(enc: Encoder) =
             if ver <> version then
                 raise (EncodingException (sprintf "Binary format version mismatch, found '%s', expecting '%s'" ver version))    
         | _ -> ()
-        let aqn = enc.Type.AssemblyQualifiedName
-        let s = reader.ReadString()
-        if s <> aqn then
-            let msg =
-                System.String.Format("Unexpected: {0}. Expecting: {1}",
-                    s, aqn)
-            raise (EncodingException msg)
+        match header, headerCont with
+        | Some headerEnc, Some cont ->
+            let h = headerEnc.Decode reader     
+            cont h
+        | _ -> ()
         use r = new InterningReader(stream, reader)
         try
             enc.Decode r
@@ -646,7 +644,7 @@ type Encoding(enc: Encoder) =
             let msg = System.String.Format("Failed to decode type: {0}", enc.Type)
             raise (EncodingException(msg, e))        
 
-    member this.Encode(stream: System.IO.Stream, value: obj, ?version: string) =
+    member this.Encode(stream: System.IO.Stream, value: obj, ?headerValue: obj) =
         let mode = System.IO.Compression.CompressionMode.Compress
         use stream = new System.IO.Compression.GZipStream(stream, mode)
         use memory = new System.IO.MemoryStream(8192)
@@ -655,7 +653,9 @@ type Encoding(enc: Encoder) =
             match version with
             | Some version -> writer.Write version
             | _ -> ()
-            writer.Write enc.Type.AssemblyQualifiedName
+            match header with
+            | Some headerEnc -> headerEnc.Encode(writer, headerValue)     
+            | _ -> ()
             use w = new InterningWriter(memory)
             enc.Encode(w, value)
             w.WriteTo stream writer
@@ -669,8 +669,11 @@ type Encoding(enc: Encoder) =
 type EncodingProvider() =
     let cache = Dictionary()
 
-    member this.DeriveEncoding t =
-        Encoding (getCachedEncoder cache t)
+    member this.DeriveEncoding (t, ?version)  =
+        Encoding (getCachedEncoder cache t, ?version = version)
+
+    member this.DeriveEncodingWithHeader (h, t, ?version)  =
+        Encoding (getCachedEncoder cache t, ?version = version, header = getCachedEncoder cache h)
 
     static member Create() =
         EncodingProvider()

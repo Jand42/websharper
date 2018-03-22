@@ -20,6 +20,8 @@
 
 namespace WebSharper.Compiler
 
+open WebSharper.Core.EmbeddedResourceNames
+
 module CT = WebSharper.Core.ContentTypes
 
 [<AutoOpen>]

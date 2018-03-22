@@ -19,7 +19,7 @@
 // $end{copyright}
 
 /// Provides utilities for accessing the file system and representing files.
-module WebSharper.Compiler.FileSystem
+module WebSharper.Core.FileSystem
 
 open System.IO
 open System.Text

@@ -38,10 +38,10 @@ exception NoEncodingException of System.Type
 type Encoding =
 
     /// Decodes an object from a stream.
-    member Decode : System.IO.Stream * ?version: string -> obj
+    member Decode : System.IO.Stream * ?headerCont: (obj -> unit) -> obj
 
     /// Encodes an object to a stream.
-    member Encode : System.IO.Stream * obj * ?version: string -> unit
+    member Encode : System.IO.Stream * obj * ?headerValue: obj -> unit
 
     /// The type for which operations are supported.
     member Type : System.Type
@@ -51,7 +51,10 @@ type Encoding =
 type EncodingProvider =
 
     /// Derives an encoding for a given type.
-    member DeriveEncoding : System.Type -> Encoding
+    member DeriveEncoding : System.Type * ?version: string -> Encoding
+
+    /// Derives an encoding for a given types with the header type read first.
+    member DeriveEncodingWithHeader : System.Type * System.Type * ?version: string -> Encoding
 
     /// Constructs a new EncodingProvider.
     static member Create : unit -> EncodingProvider
