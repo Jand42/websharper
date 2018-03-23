@@ -18,9 +18,9 @@
 //
 // $end{copyright}
 
-namespace WebSharper.Compiler
+namespace WebSharper.Core
 
-module CT = WebSharper.Core.ContentTypes
+module CT = ContentTypes
 
 /// Represents embedded resource files.
 [<Sealed>]
@@ -41,7 +41,7 @@ type EmbeddedFile =
     /// True for Script resources.
     member IsScript : bool
 
-    static member internal Create :
+    static member Create :
         assemblyFullName: string
         * resourceName: string
         * bytes: byte[]

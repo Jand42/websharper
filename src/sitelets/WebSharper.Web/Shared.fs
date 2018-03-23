@@ -23,7 +23,10 @@ module WebSharper.Web.Shared
 open System.Collections.Generic
 module J = WebSharper.Core.Json
 module M = WebSharper.Core.Metadata
+module U = WebSharper.Core.Unpacking 
 open WebSharper.Core.DependencyGraph
+open System.Reflection
+open System.IO
 
 let private trace =
     System.Diagnostics.TraceSource("WebSharper",
@@ -31,25 +34,36 @@ let private trace =
 
 let private loadMetadata () =
     let before = System.DateTime.UtcNow
-    let filterExpressions : M.Info -> M.Info =
-        match Context.GetSetting "WebSharperSharedMetadata" with
-        | Some "Inlines" -> fun m -> m.DiscardNotInlineExpressions()
-        | Some "NotInlines" -> fun m -> m.DiscardInlineExpressions()
-        | Some "Full" | None -> id
-        | _ -> fun m -> m.DiscardExpressions()
-    let metas =
+    //let filterExpressions : M.Info -> M.Info =
+    //    match Context.GetSetting "WebSharperSharedMetadata" with
+    //    | Some "Inlines" -> fun m -> m.DiscardNotInlineExpressions()
+    //    | Some "NotInlines" -> fun m -> m.DiscardInlineExpressions()
+    //    | Some "Full" | None -> id
+    //    | _ -> fun m -> m.DiscardExpressions()
+    //let metas =
+    //    WebSharper.Core.Resources.AllReferencedAssemblies.Value
+    //    |> Seq.choose M.IO.LoadReflected
+    //    |> Seq.map filterExpressions
+    //    |> Seq.toList
+
+    let assemblies =
         WebSharper.Core.Resources.AllReferencedAssemblies.Value
-        |> Seq.choose M.IO.LoadReflected
-        |> Seq.map filterExpressions
-        |> Seq.toList
+        |> List.map (fun a -> a.Location)
+
+    let baseDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+    let wsRuntimePath = Path.Combine(baseDir, "cached.wsruntime") 
+
+    let rootDirectory = Path.Combine(baseDir, "..") // TODO get correct root dir
+
+    let res =
+        U.Unpack
+            assemblies wsRuntimePath None
+            rootDirectory true true U.ExpressionOptions.DiscardExpressions 
+
     let after = System.DateTime.UtcNow
     trace.TraceInformation("Initialized WebSharper in {0} seconds.",
         (after-before).TotalSeconds)
-    if List.isEmpty metas then 
-        M.Info.Empty, Graph.Empty 
-    else 
-        let graph = Graph.FromData (metas |> Seq.map (fun m -> m.Dependencies))
-        { M.Info.UnionWithoutDependencies metas with M.Dependencies = graph.GetData() }, graph
+    res
 
 let Metadata, Dependencies = loadMetadata () 
 

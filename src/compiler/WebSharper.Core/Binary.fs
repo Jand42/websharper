@@ -653,14 +653,15 @@ type Encoding(enc: Encoder, ?version: string, ?header: Encoder) =
             match version with
             | Some version -> writer.Write version
             | _ -> ()
-            match header with
-            | Some headerEnc -> headerEnc.Encode(writer, headerValue)     
+            match header, headerValue with
+            | Some headerEnc, Some h -> headerEnc.Encode(writer, h)     
             | _ -> ()
             use w = new InterningWriter(memory)
             enc.Encode(w, value)
             w.WriteTo stream writer
         with e ->
             let msg = "Failed to encode: " + string value
+            let msg = "Failed to encode value, error: " + e.Message
             raise (EncodingException(msg, e))
 
     member this.Type = enc.Type

@@ -18,9 +18,9 @@
 //
 // $end{copyright}
 
-namespace WebSharper.Compiler
+namespace WebSharper.Core
 
-module CT = WebSharper.Core.ContentTypes
+module CT = ContentTypes
 
 type EmbeddedFile =
     {
@@ -47,7 +47,7 @@ type EmbeddedFile =
         match ri.ResContent with
         | null ->
             try
-                let s = UTF8Encoding(false, true).GetString(ri.ResContentBytes)
+                let s = System.Text.UTF8Encoding(false, true).GetString(ri.ResContentBytes)
                 ri.ResContent <- s
                 s
             with e ->

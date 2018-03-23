@@ -28,7 +28,7 @@ module P = WebSharper.PathConventions
 
 type Assembly = WebSharper.Compiler.Assembly
 type Content = WebSharper.Compiler.Content
-type EmbeddedFile = WebSharper.Compiler.EmbeddedFile
+type EmbeddedFile = WebSharper.Core.EmbeddedFile
 type Loader = WebSharper.Compiler.Loader
 type Symbols = WebSharper.Compiler.Symbols
 

@@ -20,10 +20,10 @@
 
 namespace WebSharper.Compiler
 
-open FileSystem
 module PC = WebSharper.PathConventions
 module C = Commands
 module Re = WebSharper.Core.Resources 
+module U = WebSharper.Core.Unpacking 
 
 module UnpackCommand =
     type Config =
@@ -81,86 +81,15 @@ module UnpackCommand =
             | errors -> C.ParseFailed errors
         | _ -> C.NotRecognized
 
-    let private localResTyp = typeof<Re.IDownloadableResource>
-
     let Exec env cmd =
         let baseDir =
             let pathToSelf = typeof<Config>.Assembly.Location
             Path.GetDirectoryName(pathToSelf)
-        let aR =
-            AssemblyResolver.Create()
-                .WithBaseDirectory(baseDir)
-                .SearchDirectories([baseDir])
-        let writeTextFile (output, text) =
-            Content.Text(text).WriteFile(output)
-        let writeBinaryFile (output, bytes) =
-            Binary.FromBytes(bytes).WriteFile(output)
-        System.IO.Directory.CreateDirectory cmd.RootDirectory |> ignore
-        let pc = PC.PathUtility.FileSystem(cmd.RootDirectory)
-        let aR = aR.SearchPaths(cmd.Assemblies)
-        let loader = Loader.Create aR stderr.WriteLine
-        let emit text path =
-            match text with
-            | Some text -> writeTextFile (path, text)
-            | None -> ()
-        let emitWithMap text path mapping mapFileName mapPath =
-            if cmd.UnpackSourceMap then
-                let text =
-                    text |> Option.map (fun t ->
-                    match mapping with
-                    | None -> t
-                    | Some _ -> t + ("\n//# sourceMappingURL=" + mapFileName))
-                emit text path
-                emit mapping mapPath
-            else
-                emit text path
-        let script = PC.ResourceKind.Script
-        let content = PC.ResourceKind.Content
-        for p in cmd.Assemblies do
-            match (try loader.LoadFile p |> Some with _ -> None) with 
-            | None -> () 
-            | Some a ->
-            let aid = PC.AssemblyId.Create(a.Name)
-            emitWithMap a.ReadableJavaScript (pc.JavaScriptPath aid)
-                a.MapFileForReadable (pc.MapFileName aid) (pc.MapFilePath aid)
-            emitWithMap a.CompressedJavaScript (pc.MinifiedJavaScriptPath aid)
-                a.MapFileForCompressed (pc.MinifiedMapFileName aid) (pc.MinifiedMapFilePath aid)
-            if cmd.UnpackTypeScript then
-                emit a.TypeScriptDeclarations (pc.TypeScriptDefinitionsPath aid)
-            let writeText k fn c =
-                let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
-                writeTextFile (p, c)
-            let writeBinary k fn c =
-                let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
-                writeBinaryFile (p, c)
-            for r in a.GetScripts() do
-                writeText script r.FileName r.Content
-            for r in a.GetContents() do
-                writeBinary content r.FileName (r.GetContentData())
-
-            let rec printError (e: exn) =
-                if isNull e.InnerException then
-                    e.Message
-                else e.Message + " - " + printError e.InnerException 
-            
-            if cmd.DownloadResources then
-                try
-                    let asm = 
-                        try
-                            System.Reflection.Assembly.Load (Path.GetFileNameWithoutExtension p)
-                        with e ->
-                            eprintfn "Failed to load assembly for unpacking local resources: %s - %s" p (printError e)     
-                            null
-                    if not (isNull asm) then
-                        for t in asm.GetTypes() do
-                            if t.GetInterfaces() |> Array.contains localResTyp then
-                                try
-                                    let res = Activator.CreateInstance(t) :?> Re.IDownloadableResource
-                                    res.Unpack(cmd.RootDirectory)
-                                with e ->
-                                    eprintfn "Failed to unpack local resource: %s - %s" t.FullName (printError e)     
-                with e ->
-                    eprintfn "Failed to unpack local resources: %s" (printError e)     
+        let wsRuntimePath = Path.Combine(baseDir, "cached.wsruntime") 
+        U.Unpack
+            cmd.Assemblies wsRuntimePath None
+            cmd.RootDirectory cmd.DownloadResources cmd.UnpackSourceMap U.ExpressionOptions.DiscardExpressions 
+        |> ignore
 
         C.Ok
 

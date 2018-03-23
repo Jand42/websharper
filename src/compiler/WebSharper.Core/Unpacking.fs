@@ -28,6 +28,7 @@ module PC = WebSharper.PathConventions
 module Re = Resources 
 module B = Binary
 module M = Metadata
+module CT = ContentTypes
 
 type ExpressionOptions =
     | FullMetadata
@@ -39,6 +40,7 @@ type RuntimeHeader =
     {
         DownloadResources : bool
         UseSourceMap : bool
+        SourceAssemblies : string[]
         UnpackedFiles : string[]
         ExpressionOptions : ExpressionOptions
     }
@@ -49,7 +51,19 @@ let UnpackedMetadataEncoding =
     with B.NoEncodingException t ->
         failwithf "Failed to create binary encoder for type %s" t.FullName
 
-let Unpack (assemblies: list<string>) (wsRuntimePath: string) (preMerged: option<M.Info>) (rootDirectory: string) (download: bool) (sourceMap: bool) (options: ExpressionOptions) =
+let IsWebResourceAttribute (fullName: string) =
+    fullName = "System.Web.UI.WebResourceAttribute"
+    || fullName = "WebSharper.WebResourceAttribute"
+
+let (|StringArg|_|) (attr: System.Reflection.CustomAttributeTypedArgument) =
+    if attr.ArgumentType = typeof<string> then
+        Some (attr.Value :?> string)
+    else
+        None
+
+let Unpack
+    (assemblies: list<string>) (wsRuntimePath: string) (preMerged: option<M.Info>)
+    (rootDirectory: string) (download: bool) (sourceMap: bool) (options: ExpressionOptions) =
     
     let failIfHeaderNotUpToDate (h: obj) =
         match h with
@@ -59,6 +73,7 @@ let Unpack (assemblies: list<string>) (wsRuntimePath: string) (preMerged: option
             if not sourceMap && header.UseSourceMap then failwith "Source mapping was turned off since latest unpack"     
             if options <> header.ExpressionOptions then failwith "Expression kinds to keep in runtime metadata was changed since last unpack"     
             let wsRuntimeTimestamp = File.GetLastWriteTimeUtc wsRuntimePath
+            // TODO for a in header.SourceAssemblies do
             for f in header.UnpackedFiles do
                 let fp = Path.Combine(rootDirectory, f)
                 if not <| File.Exists fp then
@@ -78,12 +93,17 @@ let Unpack (assemblies: list<string>) (wsRuntimePath: string) (preMerged: option
         else None
 
     match fromFile with 
-    | Some m -> m
+    | Some meta -> 
+        meta, DependencyGraph.Graph.FromData(meta.Dependencies)
     | _ ->
 
+        if File.Exists wsRuntimePath then
+            File.Delete wsRuntimePath
         use outStream = File.OpenWrite wsRuntimePath
         
         let unpackedFiles = ResizeArray()
+        let unpackedAssemblies = ResizeArray()
+        let metas = ResizeArray()
 
         let writeTextFile (output, text) =
             Content.Text(text).WriteFile(output)
@@ -92,23 +112,26 @@ let Unpack (assemblies: list<string>) (wsRuntimePath: string) (preMerged: option
         System.IO.Directory.CreateDirectory rootDirectory |> ignore
         let rc = PC.PathUtility.FileSystem("")
         let pc = PC.PathUtility.FileSystem(rootDirectory)
-        let emit text path =
+        let emit text path shortPath =
             match text with
-            | Some text -> writeTextFile (path, text)
+            | Some text ->
+                writeTextFile (path, text)
+                unpackedFiles.Add shortPath
             | None -> ()
-        let emitWithMap text path mapping mapFileName mapPath =
+        let emitWithMap text path shortPath mapping mapFileName mapPath mapShortPath =
             if sourceMap then
                 let text =
                     text |> Option.map (fun t ->
                     match mapping with
                     | None -> t
                     | Some _ -> t + ("\n//# sourceMappingURL=" + mapFileName))
-                emit text path
-                emit mapping mapPath
+                emit text path shortPath
+                emit mapping mapPath mapShortPath
             else
-                emit text path
+                emit text path shortPath
         let script = PC.ResourceKind.Script
         let content = PC.ResourceKind.Content
+        let localResTyp = typeof<Re.IDownloadableResource>
         for p in assemblies do
             let rec printError (e: exn) =
                 if isNull e.InnerException then
@@ -120,45 +143,95 @@ let Unpack (assemblies: list<string>) (wsRuntimePath: string) (preMerged: option
                 with e ->
                     eprintfn "Failed to load assembly for unpacking WebSharper resources: %s - %s" p (printError e)     
                     null
+            
+            if asm.GetManifestResourceNames() |> Array.contains EMBEDDED_METADATA then
+            
+                unpackedAssemblies.Add(Path.GetFileName p)
+                metas.Add(M.IO.LoadReflected(asm))
+                let a = asm.FullName
+                
+                let readResource name =
+                    use s = asm.GetManifestResourceStream name
+                    if isNull s then None else
+                    use r = new StreamReader(s)
+                    Some (r.ReadToEnd())
 
-            let aid = PC.AssemblyId.Create(Path.GetFileNameWithoutExtension p)
+                let readResourceBytes name =
+                    use s = asm.GetManifestResourceStream name
+                    if isNull s then None else
+                    use m = new MemoryStream()
+                    s.CopyTo(m)
+                    Some (m.ToArray())
+
+                let aid = PC.AssemblyId.Create(a)
             
-            emitWithMap a.ReadableJavaScript (pc.JavaScriptPath aid)
-                a.MapFileForReadable (pc.MapFileName aid) (pc.MapFilePath aid)
-            emitWithMap a.CompressedJavaScript (pc.MinifiedJavaScriptPath aid)
-                a.MapFileForCompressed (pc.MinifiedMapFileName aid) (pc.MinifiedMapFilePath aid)
-            if cmd.UnpackTypeScript then
-                emit a.TypeScriptDeclarations (pc.TypeScriptDefinitionsPath aid)
-            let writeText k fn c =
-                let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
-                writeTextFile (p, c)
-            let writeBinary k fn c =
-                let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
-                writeBinaryFile (p, c)
-            for r in a.GetScripts() do
-                writeText script r.FileName r.Content
-            for r in a.GetContents() do
-                writeBinary content r.FileName (r.GetContentData())
+                emitWithMap (readResource EMBEDDED_JS) (pc.JavaScriptPath aid) (rc.JavaScriptPath aid)
+                    (readResource EMBEDDED_MAP) (pc.MapFileName aid) (pc.MapFilePath aid) (rc.MapFilePath aid)
+                emitWithMap (readResource EMBEDDED_MINJS) (pc.MinifiedJavaScriptPath aid) (rc.MinifiedJavaScriptPath aid)
+                    (readResource EMBEDDED_MINMAP) (pc.MinifiedMapFileName aid) (pc.MinifiedMapFilePath aid) (rc.MinifiedMapFilePath aid)
+                let writeText k fn c =
+                    let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
+                    writeTextFile (p, c)
+                let writeBinary k fn c =
+                    let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
+                    writeBinaryFile (p, c)
+                
+                let webResources =
+                    asm.CustomAttributes
+                    |> Seq.choose (fun attr ->
+                        if IsWebResourceAttribute attr.AttributeType.FullName then
+                            match Seq.toList attr.ConstructorArguments with
+                            | [StringArg resourceName; StringArg contentType] ->
+                                readResourceBytes resourceName
+                                |> Option.map (fun c ->
+                                    EmbeddedFile.Create(string a, resourceName, c, CT.Parse contentType))
+                            | _ -> None
+                        else None)
+
+                for r in webResources do
+                    if r.IsScript then
+                        writeText script r.FileName r.Content
+                    else
+                        writeBinary content r.FileName (r.GetContentData())
             
-            if cmd.DownloadResources then
-                try
-                    let asm = 
-                        try
-                            System.Reflection.Assembly.Load (Path.GetFileNameWithoutExtension p)
-                        with e ->
-                            eprintfn "Failed to load assembly for unpacking local resources: %s - %s" p (printError e)     
-                            null
-                    if not (isNull asm) then
+                if download then
+                    try
                         for t in asm.GetTypes() do
                             if t.GetInterfaces() |> Array.contains localResTyp then
                                 try
-                                    let res = Activator.CreateInstance(t) :?> Re.IDownloadableResource
-                                    res.Unpack(cmd.RootDirectory)
+                                    let res = System.Activator.CreateInstance(t) :?> Re.IDownloadableResource
+                                    res.Unpack(rootDirectory)
                                 with e ->
-                                    eprintfn "Failed to unpack local resource: %s - %s" t.FullName (printError e)     
-                with e ->
-                    eprintfn "Failed to unpack local resources: %s" (printError e)   
+                                    eprintfn "Failed to unpack remote resource: %s - %s" t.FullName (printError e)     
+                    with e ->
+                        eprintfn "Failed to unpack remote resources: %s" (printError e)   
                     
-        let meta = failwith "TODO"
+        let graph =
+            DependencyGraph.Graph.NewWithDependencyAssemblies(metas |> Seq.choose id |> Seq.map (fun m -> m.Dependencies))
+        let fullMeta =
+            M.Info.UnionWithoutDependencies (metas |> Seq.choose id)
+            //{ 
+            //    M.Info.UnionWithoutDependencies (metas |> Seq.choose id) with
+            //        Dependencies = graph.GetData()
+            //}
 
-        meta
+        let trimmedMeta =
+            match options with
+            | FullMetadata -> fullMeta
+            | DiscardExpressions -> fullMeta.DiscardExpressions() 
+            | DiscardInlineExpressions -> fullMeta.DiscardInlineExpressions()
+            | DiscardNotInlineExpressions -> fullMeta.DiscardNotInlineExpressions()
+        
+        let header =
+            {
+                DownloadResources = download
+                UseSourceMap = sourceMap
+                SourceAssemblies = unpackedAssemblies.ToArray()
+                UnpackedFiles = unpackedFiles.ToArray()
+                ExpressionOptions = options
+            }
+
+        UnpackedMetadataEncoding.Encode(outStream, trimmedMeta, header)
+        printfn "Saved precomputed metadata: %s" wsRuntimePath
+
+        trimmedMeta, graph

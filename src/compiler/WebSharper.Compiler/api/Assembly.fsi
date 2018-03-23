@@ -20,6 +20,8 @@
 
 namespace WebSharper.Compiler
 
+open WebSharper.Core
+
 /// Represents assemblies.
 [<Sealed>]
 type Assembly =

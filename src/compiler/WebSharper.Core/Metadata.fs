@@ -497,12 +497,8 @@ module IO =
     let Encode stream (comp: Info) = MetadataEncoding.Encode(stream, comp)
 
     let LoadReflected(a: System.Reflection.Assembly) =
-        if a.FullName.StartsWith "System" then None else
-            if a.GetManifestResourceNames() |> Array.contains EMBEDDED_METADATA then
-                use s = a.GetManifestResourceStream n
-                try
-                    Some (Decode s)
-                with e ->
-                    failwithf "Failed to load metadata for: %s. Error: %s" a.FullName e.Message
-            else
-                None
+        use s = a.GetManifestResourceStream EMBEDDED_METADATA
+        if isNull s then None else
+        try Some (Decode s)
+        with e ->
+            failwithf "Failed to load metadata for: %s. Error: %s" a.FullName e.Message
