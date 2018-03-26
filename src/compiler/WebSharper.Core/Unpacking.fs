@@ -20,7 +20,9 @@
 
 module WebSharper.Core.Unpacking
 
+open System
 open System.IO
+open System.Collections.Generic
 open FileSystem
 open EmbeddedResourceNames
 
@@ -38,11 +40,9 @@ type ExpressionOptions =
 
 type RuntimeHeader =
     {
-        Timestamp : int64
         DownloadResources : bool
         UseSourceMap : bool
-        SourceAssemblies : string[]
-        UnpackedFiles : string[]
+        SourceAssemblies : (string * int64)[]
         ExpressionOptions : ExpressionOptions
     }
 
@@ -73,14 +73,20 @@ let Unpack
             if sourceMap && not header.UseSourceMap then failwith "Source mapping was turned on since latest unpack"        
             if not sourceMap && header.UseSourceMap then failwith "Source mapping was turned off since latest unpack"     
             if options <> header.ExpressionOptions then failwith "Expression kinds to keep in runtime metadata was changed since last unpack"     
-            //let wsRuntimeTimestamp = System.DateTime.FromFileTimeUtc(header.Timestamp)
-            //// TODO for a in header.SourceAssemblies do
-            //for f in header.UnpackedFiles do
-            //    let fp = Path.Combine(rootDirectory, f)
-            //    if not <| File.Exists fp then
-            //        failwithf "Unpacked file was not found: %s" f
-            //    if File.GetLastWriteTimeUtc fp < wsRuntimeTimestamp then
-            //        failwithf "Unpacked file has older timestamp than wsruntime: %s" f
+            let dlls = Dictionary() 
+            for a in assemblies do 
+                dlls.Add(Path.GetFileName a, a)
+            for (a, ts) in header.SourceAssemblies do
+                match dlls.TryGetValue(a) with
+                | false, _ ->
+                    failwithf "Assembly %s was removed since latest unpack" a 
+                | true, p ->
+                    // TODO check timestamp
+                    dlls.Remove(a) |> ignore
+
+            if dlls.Count > 0 then
+                let a = (Seq.head dlls).Key    
+                failwithf "Assembly %s was added since latest unpack" a 
 
         | _ -> failwith "Could not read header from wsruntime file" 
 
@@ -98,13 +104,10 @@ let Unpack
         meta, DependencyGraph.Graph.FromData(meta.Dependencies)
     | _ ->
 
-        let timestamp = System.DateTime.UtcNow.ToFileTimeUtc()
-
         if File.Exists wsRuntimePath then
             File.Delete wsRuntimePath
         use outStream = File.OpenWrite wsRuntimePath
         
-        let unpackedFiles = ResizeArray()
         let unpackedAssemblies = ResizeArray()
         let metas = ResizeArray()
 
@@ -113,25 +116,23 @@ let Unpack
         let writeBinaryFile (output, bytes) =
             Binary.FromBytes(bytes).WriteFile(output)
         System.IO.Directory.CreateDirectory rootDirectory |> ignore
-        let rc = PC.PathUtility.FileSystem("")
         let pc = PC.PathUtility.FileSystem(rootDirectory)
-        let emit text path shortPath =
+        let emit text path =
             match text with
             | Some text ->
                 writeTextFile (path, text)
-                unpackedFiles.Add shortPath
             | None -> ()
-        let emitWithMap text path shortPath mapping mapFileName mapPath mapShortPath =
+        let emitWithMap text path mapping mapFileName mapPath =
             if sourceMap then
                 let text =
                     text |> Option.map (fun t ->
                     match mapping with
                     | None -> t
                     | Some _ -> t + ("\n//# sourceMappingURL=" + mapFileName))
-                emit text path shortPath
-                emit mapping mapPath mapShortPath
+                emit text path
+                emit mapping mapPath
             else
-                emit text path shortPath
+                emit text path
         let script = PC.ResourceKind.Script
         let content = PC.ResourceKind.Content
         let localResTyp = typeof<Re.IDownloadableResource>
@@ -149,7 +150,7 @@ let Unpack
             
             if asm.GetManifestResourceNames() |> Array.contains EMBEDDED_METADATA then
             
-                unpackedAssemblies.Add(Path.GetFileName p)
+                unpackedAssemblies.Add(Path.GetFileName p, File.GetLastWriteTimeUtc(p).ToFileTimeUtc())
                 metas.Add(M.IO.LoadReflected(asm))
                 let a = asm.FullName
                 
@@ -168,10 +169,10 @@ let Unpack
 
                 let aid = PC.AssemblyId.Create(a)
             
-                emitWithMap (readResource EMBEDDED_JS) (pc.JavaScriptPath aid) (rc.JavaScriptPath aid)
-                    (readResource EMBEDDED_MAP) (pc.MapFileName aid) (pc.MapFilePath aid) (rc.MapFilePath aid)
-                emitWithMap (readResource EMBEDDED_MINJS) (pc.MinifiedJavaScriptPath aid) (rc.MinifiedJavaScriptPath aid)
-                    (readResource EMBEDDED_MINMAP) (pc.MinifiedMapFileName aid) (pc.MinifiedMapFilePath aid) (rc.MinifiedMapFilePath aid)
+                emitWithMap (readResource EMBEDDED_JS) (pc.JavaScriptPath aid)
+                    (readResource EMBEDDED_MAP) (pc.MapFileName aid) (pc.MapFilePath aid)
+                emitWithMap (readResource EMBEDDED_MINJS) (pc.MinifiedJavaScriptPath aid)
+                    (readResource EMBEDDED_MINMAP) (pc.MinifiedMapFileName aid) (pc.MinifiedMapFilePath aid)
                 let writeText k fn c =
                     let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
                     writeTextFile (p, c)
@@ -226,11 +227,9 @@ let Unpack
         
         let header =
             {
-                Timestamp = timestamp
                 DownloadResources = download
                 UseSourceMap = sourceMap
                 SourceAssemblies = unpackedAssemblies.ToArray()
-                UnpackedFiles = unpackedFiles.ToArray()
                 ExpressionOptions = options
             }
 
