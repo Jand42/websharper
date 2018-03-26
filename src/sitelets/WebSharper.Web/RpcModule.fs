@@ -254,11 +254,14 @@ type RpcHandler() =
 [<Sealed>]
 type RpcModule() =
 
-    let handler = RpcHandler()
+    let mutable handler = Unchecked.defaultof<RpcHandler>
 
     interface IHttpModule with
         member this.Init(app: HttpApplication) =
-            let handler =
+            let rootFolder = HttpRuntime.AppDomainAppPath
+            Shared.Initialize(Path.Combine(rootFolder, "bin"), rootFolder)
+            handler <- RpcHandler()
+            let handleRequest =
                 new EventHandler(fun x e ->
                     let app = (x :?> HttpApplication)
                     let ctx = app.Context
@@ -273,9 +276,9 @@ type RpcModule() =
                         else
                             ctx.Handler <- handler)
             if HttpRuntime.UsingIntegratedPipeline then
-                app.add_PostAuthorizeRequest(handler)
+                app.add_PostAuthorizeRequest(handleRequest)
             else
-                app.add_PostMapRequestHandler(handler)
+                app.add_PostMapRequestHandler(handleRequest)
         member this.Dispose() = ()
 
     member this.TryProcessRequest(ctx: HttpContextBase) : option<Async<unit>> =

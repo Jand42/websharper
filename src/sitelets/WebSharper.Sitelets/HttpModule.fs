@@ -195,11 +195,13 @@ type HttpModule() =
     interface IHttpModule with
         member this.Init app =
             let appPath = HttpRuntime.AppDomainAppVirtualPath
+            let rootFolder = HttpRuntime.AppDomainAppPath
+            Shared.Initialize(Path.Combine(rootFolder, "bin"), rootFolder)
             runtime <- Some (
                 Loading.SiteletDefinition,
                 ResourceContext.ResourceContext appPath,
                 appPath,
-                HttpRuntime.AppDomainAppPath
+                rootFolder
             )
             let handler =
                 new EventHandler(fun x _ ->

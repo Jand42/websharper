@@ -38,6 +38,7 @@ type ExpressionOptions =
 
 type RuntimeHeader =
     {
+        Timestamp : int64
         DownloadResources : bool
         UseSourceMap : bool
         SourceAssemblies : string[]
@@ -72,14 +73,14 @@ let Unpack
             if sourceMap && not header.UseSourceMap then failwith "Source mapping was turned on since latest unpack"        
             if not sourceMap && header.UseSourceMap then failwith "Source mapping was turned off since latest unpack"     
             if options <> header.ExpressionOptions then failwith "Expression kinds to keep in runtime metadata was changed since last unpack"     
-            let wsRuntimeTimestamp = File.GetLastWriteTimeUtc wsRuntimePath
-            // TODO for a in header.SourceAssemblies do
-            for f in header.UnpackedFiles do
-                let fp = Path.Combine(rootDirectory, f)
-                if not <| File.Exists fp then
-                    failwithf "Unpacked file was not found: %s" f
-                if File.GetLastWriteTimeUtc fp < wsRuntimeTimestamp then
-                    failwithf "Unpacked file has older timestamp than wsruntime: %s" f
+            //let wsRuntimeTimestamp = System.DateTime.FromFileTimeUtc(header.Timestamp)
+            //// TODO for a in header.SourceAssemblies do
+            //for f in header.UnpackedFiles do
+            //    let fp = Path.Combine(rootDirectory, f)
+            //    if not <| File.Exists fp then
+            //        failwithf "Unpacked file was not found: %s" f
+            //    if File.GetLastWriteTimeUtc fp < wsRuntimeTimestamp then
+            //        failwithf "Unpacked file has older timestamp than wsruntime: %s" f
 
         | _ -> failwith "Could not read header from wsruntime file" 
 
@@ -96,6 +97,8 @@ let Unpack
     | Some meta -> 
         meta, DependencyGraph.Graph.FromData(meta.Dependencies)
     | _ ->
+
+        let timestamp = System.DateTime.UtcNow.ToFileTimeUtc()
 
         if File.Exists wsRuntimePath then
             File.Delete wsRuntimePath
@@ -207,13 +210,12 @@ let Unpack
                         eprintfn "Failed to unpack remote resources: %s" (printError e)   
                     
         let graph =
-            DependencyGraph.Graph.NewWithDependencyAssemblies(metas |> Seq.choose id |> Seq.map (fun m -> m.Dependencies))
+            DependencyGraph.Graph.FromData(metas |> Seq.choose id |> Seq.map (fun m -> m.Dependencies))
         let fullMeta =
-            M.Info.UnionWithoutDependencies (metas |> Seq.choose id)
-            //{ 
-            //    M.Info.UnionWithoutDependencies (metas |> Seq.choose id) with
-            //        Dependencies = graph.GetData()
-            //}
+            { 
+                M.Info.UnionWithoutDependencies (metas |> Seq.choose id) with
+                    Dependencies = graph.GetData()
+            }
 
         let trimmedMeta =
             match options with
@@ -224,6 +226,7 @@ let Unpack
         
         let header =
             {
+                Timestamp = timestamp
                 DownloadResources = download
                 UseSourceMap = sourceMap
                 SourceAssemblies = unpackedAssemblies.ToArray()
@@ -233,5 +236,7 @@ let Unpack
 
         UnpackedMetadataEncoding.Encode(outStream, trimmedMeta, header)
         printfn "Saved precomputed metadata: %s" wsRuntimePath
+
+        outStream.Close()
 
         trimmedMeta, graph

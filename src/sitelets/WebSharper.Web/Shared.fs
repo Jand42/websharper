@@ -18,7 +18,7 @@
 //
 // $end{copyright}
 
-module WebSharper.Web.Shared
+namespace WebSharper.Web
 
 open System.Collections.Generic
 module J = WebSharper.Core.Json
@@ -28,48 +28,54 @@ open WebSharper.Core.DependencyGraph
 open System.Reflection
 open System.IO
 
-let private trace =
-    System.Diagnostics.TraceSource("WebSharper",
-        System.Diagnostics.SourceLevels.All)
+[<AbstractClass>]
+type Shared() =
+    static let lockObject = obj()
+    static let mutable meta = Unchecked.defaultof<M.Info>
+    static let mutable deps = Unchecked.defaultof<Graph>
+    static let mutable json = Unchecked.defaultof<J.Provider>
 
-let private loadMetadata () =
-    let before = System.DateTime.UtcNow
-    //let filterExpressions : M.Info -> M.Info =
-    //    match Context.GetSetting "WebSharperSharedMetadata" with
-    //    | Some "Inlines" -> fun m -> m.DiscardNotInlineExpressions()
-    //    | Some "NotInlines" -> fun m -> m.DiscardInlineExpressions()
-    //    | Some "Full" | None -> id
-    //    | _ -> fun m -> m.DiscardExpressions()
-    //let metas =
-    //    WebSharper.Core.Resources.AllReferencedAssemblies.Value
-    //    |> Seq.choose M.IO.LoadReflected
-    //    |> Seq.map filterExpressions
-    //    |> Seq.toList
+    static member Metadata = 
+        if obj.ReferenceEquals(meta, null) then
+            failwith "Shared metadata is accessed before it is initialized"
+        meta
+    static member Dependencies = 
+        if obj.ReferenceEquals(meta, null) then
+            failwith "Shared dependency graph is accessed before it is initialized"
+        deps
+    static member Json = 
+        if obj.ReferenceEquals(meta, null) then
+            failwith "Shared json provider is accessed before it is initialized"
+        json
+    static member PlainJson = WebSharper.Json.ServerSideProvider
 
-    let assemblies =
-        WebSharper.Core.Resources.AllReferencedAssemblies.Value
-        |> List.map (fun a -> a.Location)
+    static member Initialize (binDir, wwwRoot) =
+        if obj.ReferenceEquals(meta, null) then
+            lock lockObject <| fun () ->
+            let trace =
+                System.Diagnostics.TraceSource("WebSharper",
+                    System.Diagnostics.SourceLevels.All)
+            let before = System.DateTime.UtcNow
+            let assemblies =
+                WebSharper.Core.Resources.AllReferencedAssemblies.Value
+                |> List.map (fun a -> a.Location)
 
-    let baseDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
-    let wsRuntimePath = Path.Combine(baseDir, "cached.wsruntime") 
+            let wsRuntimePath = Path.Combine(binDir, "cached.wsruntime") 
 
-    let rootDirectory = Path.Combine(baseDir, "..") // TODO get correct root dir
+            let m, d =
+                U.Unpack
+                    assemblies wsRuntimePath None
+                    wwwRoot true true U.ExpressionOptions.DiscardExpressions 
 
-    let res =
-        U.Unpack
-            assemblies wsRuntimePath None
-            rootDirectory true true U.ExpressionOptions.DiscardExpressions 
+            let after = System.DateTime.UtcNow
+            trace.TraceInformation("Initialized WebSharper in {0} seconds.",
+                (after-before).TotalSeconds)
+        
+            meta <- m
+            deps <- d
+            json <- J.Provider.CreateTyped m
 
-    let after = System.DateTime.UtcNow
-    trace.TraceInformation("Initialized WebSharper in {0} seconds.",
-        (after-before).TotalSeconds)
-    res
+module Shared =
 
-let Metadata, Dependencies = loadMetadata () 
-
-let Json = J.Provider.CreateTyped Metadata
-
-let PlainJson = WebSharper.Json.ServerSideProvider
-
-[<Literal>]
-let internal SCRIPT_MANAGER_ID = "WebSharperScriptManager"
+    [<Literal>]
+    let SCRIPT_MANAGER_ID = "WebSharperScriptManager"
