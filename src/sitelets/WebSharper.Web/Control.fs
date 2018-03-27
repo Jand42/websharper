@@ -49,7 +49,7 @@ type Require (t: System.Type, [<System.ParamArray>] parameters: obj[]) =
     override this.OnLoad _ =
         this.ID <-
             ScriptManager.Find(base.Page)
-                .Register(None, this, Shared.Metadata, Shared.Json)
+                .Register(None, this, Shared.GetMetadata(), Shared.GetJson())
 
     override this.Render _ = ()
 #endif
@@ -83,7 +83,7 @@ type Control() =
     override this.OnLoad _ =
         this.ID <-
             ScriptManager.Find(base.Page)
-                .Register(Some id, this, Shared.Metadata, Shared.Json)
+                .Register(Some id, this, Shared.GetMetadata(), Shared.GetJson())
 #endif
 
     interface INode with

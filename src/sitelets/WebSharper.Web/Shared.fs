@@ -18,7 +18,7 @@
 //
 // $end{copyright}
 
-namespace WebSharper.Web
+module WebSharper.Web.Shared
 
 open System.Collections.Generic
 module J = WebSharper.Core.Json
@@ -28,30 +28,39 @@ open WebSharper.Core.DependencyGraph
 open System.Reflection
 open System.IO
 
-[<AbstractClass>]
-type Shared() =
-    static let lockObject = obj()
-    static let mutable meta = Unchecked.defaultof<M.Info>
-    static let mutable deps = Unchecked.defaultof<Graph>
-    static let mutable json = Unchecked.defaultof<J.Provider>
+[<CompilationRepresentation(CompilationRepresentationFlags.UseNullAsTrueValue)>]
+type private RuntimeData =
+    | NotInitialized
+    | Initialized of M.Info * Graph * J.Provider 
 
-    static member Metadata = 
-        if obj.ReferenceEquals(meta, null) then
-            failwith "Shared metadata is accessed before it is initialized"
-        meta
-    static member Dependencies = 
-        if obj.ReferenceEquals(meta, null) then
-            failwith "Shared dependency graph is accessed before it is initialized"
-        deps
-    static member Json = 
-        if obj.ReferenceEquals(meta, null) then
-            failwith "Shared json provider is accessed before it is initialized"
-        json
-    static member PlainJson = WebSharper.Json.ServerSideProvider
+let mutable private data = NotInitialized 
 
-    static member Initialize (binDir, wwwRoot) =
-        if obj.ReferenceEquals(meta, null) then
-            lock lockObject <| fun () ->
+let GetMetadata() =
+    match data with
+    | NotInitialized ->
+        failwith "Shared metadata is accessed before it is initialized"
+    | Initialized (meta, _, _) -> meta 
+   
+let GetDependencies() =
+    match data with
+    | NotInitialized ->
+        failwith "Shared dependency graph is accessed before it is initialized"
+    | Initialized (_, deps, _) -> deps 
+   
+let GetJson() =
+    match data with
+    | NotInitialized ->
+        failwith "Shared json provider is accessed before it is initialized"
+    | Initialized (_, _, json) -> json 
+   
+let PlainJson = WebSharper.Json.ServerSideProvider
+
+let private lockObject = obj()
+
+let Initialize (binDir, wwwRoot) =
+    match data with 
+    | NotInitialized ->
+        lock lockObject <| fun () ->
             let trace =
                 System.Diagnostics.TraceSource("WebSharper",
                     System.Diagnostics.SourceLevels.All)
@@ -71,11 +80,8 @@ type Shared() =
             trace.TraceInformation("Initialized WebSharper in {0} seconds.",
                 (after-before).TotalSeconds)
         
-            meta <- m
-            deps <- d
-            json <- J.Provider.CreateTyped m
+            data <- Initialized (m, d, J.Provider.CreateTyped m)
+    | _ -> ()
 
-module Shared =
-
-    [<Literal>]
-    let SCRIPT_MANAGER_ID = "WebSharperScriptManager"
+[<Literal>]
+let SCRIPT_MANAGER_ID = "WebSharperScriptManager"

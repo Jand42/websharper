@@ -79,12 +79,12 @@ type ScriptManager() =
         let ctx = this.ResourceContext
         let resources = 
             ctx.ResourceDependencyCache.GetOrAdd(Set nodes, fun nodes ->
-                Shared.Dependencies.GetResources nodes
+                Shared.GetDependencies().GetResources nodes
             )
         if not (List.isEmpty resources) then
             let content =
                 J.Encoded.Object [for kv in registry -> (kv.Key, kv.Value)]
-                |> Shared.Json.Pack
+                |> Shared.GetJson().Pack
                 |> J.Stringify
             writer.WriteLine()
             writer.WriteLine("<meta id='{0}' name='{0}' content='{1}' />",

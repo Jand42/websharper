@@ -119,15 +119,15 @@ module private WebUtils =
     let getContext (site: Sitelet<obj>) (ctx: HttpContextBase) resCtx appPath rootFolder (request: Http.Request) =
         new Context<obj>(
             ApplicationPath = appPath,
-            Json = Shared.Json,
+            Json = Shared.GetJson(),
             Link = (fun action ->
                 match site.Router.Link action with
                 | Some loc ->
                     if loc.IsAbsoluteUri then string loc else
                         joinWithSlash appPath (string loc)
                 | None -> failwith "Failed to link to action"),            
-            Metadata = Shared.Metadata,
-            Dependencies = Shared.Dependencies,
+            Metadata = Shared.GetMetadata(),
+            Dependencies = Shared.GetDependencies(),
             ResourceContext = resCtx,
             Request = request,
             RootFolder = rootFolder,

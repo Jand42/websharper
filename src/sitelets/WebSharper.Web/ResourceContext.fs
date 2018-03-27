@@ -27,7 +27,7 @@ module ResourceContext =
                     let url = if isDebug then pu.JavaScriptPath(aid) else pu.MinifiedJavaScriptPath(aid)
                     let version = 
                         let fileName = if isDebug then pu.JavaScriptFileName(aid) else pu.MinifiedJavaScriptFileName(aid)
-                        match Shared.Metadata.ResourceHashes.TryGetValue(fileName) with
+                        match Shared.GetMetadata().ResourceHashes.TryGetValue(fileName) with
                         | true, h -> "?h=" + string h
                         | _ -> ""
                     Re.RenderLink (url + version)
@@ -40,7 +40,7 @@ module ResourceContext =
                     let r = P.EmbeddedResource.Create(kind, id, resource)
                     let url = pu.EmbeddedPath r
                     let version = 
-                        match Shared.Metadata.ResourceHashes.TryGetValue(pu.EmbeddedResourceKey r) with
+                        match Shared.GetMetadata().ResourceHashes.TryGetValue(pu.EmbeddedResourceKey r) with
                         | true, h -> "?h=" + string h
                         | _ -> ""
                     Re.RenderLink (url + version)

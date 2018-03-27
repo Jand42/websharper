@@ -154,7 +154,7 @@ type RpcHandler() =
             ConfigurationManager.AppSettings.[s]
             |> Option.ofObj
 
-    let server = R.Server.Create Shared.Metadata Shared.Json
+    let server = R.Server.Create (Shared.GetMetadata()) (Shared.GetJson())
     let rootFolder = HttpRuntime.AppDomainAppPath
     let appPath = HttpRuntime.AppDomainAppVirtualPath
     let resCtx = ResourceContext.ResourceContext appPath
@@ -193,9 +193,9 @@ type RpcHandler() =
                         member this.RequestUri = uri
                         member this.UserSession = session :> _ 
                         member this.Environment = upcast Map.ofList [(RpcUtil.HttpContextKey, ctx :> obj)]
-                        member this.Json = Shared.Json
-                        member this.Metadata = Shared.Metadata
-                        member this.Dependencies = Shared.Dependencies
+                        member this.Json = Shared.GetJson()
+                        member this.Metadata = Shared.GetMetadata()
+                        member this.Dependencies = Shared.GetDependencies()
                         member this.ApplicationPath = appPath
                         member this.ResourceContext = resCtx }
                 let! response =
