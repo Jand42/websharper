@@ -58,9 +58,9 @@ let PlainJson = WebSharper.Json.ServerSideProvider
 let private lockObject = obj()
 
 let Initialize (binDir, wwwRoot) =
-    match data with 
-    | NotInitialized ->
+    if data = NotInitialized then 
         lock lockObject <| fun () ->
+        if data = NotInitialized then 
             let trace =
                 System.Diagnostics.TraceSource("WebSharper",
                     System.Diagnostics.SourceLevels.All)
@@ -81,7 +81,6 @@ let Initialize (binDir, wwwRoot) =
                 (after-before).TotalSeconds)
         
             data <- Initialized (m, d, J.Provider.CreateTyped m)
-    | _ -> ()
 
 [<Literal>]
 let SCRIPT_MANAGER_ID = "WebSharperScriptManager"
