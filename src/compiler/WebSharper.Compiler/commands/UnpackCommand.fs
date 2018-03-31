@@ -81,18 +81,76 @@ module UnpackCommand =
             | errors -> C.ParseFailed errors
         | _ -> C.NotRecognized
 
+
+    let private localResTyp = typeof<Re.IDownloadableResource>
+
+    type ReferenceAssembly (asm: Assembly) =
+        interface U.IAssembly with
+            member this.Name = asm.FullName
+            member this.GetResourceStream (name: string) = 
+                asm.Raw.MainModule.Resources
+                |> Seq.tryPick (function
+                    | :? Mono.Cecil.EmbeddedResource as r when r.Name = name ->
+                        r.GetResourceStream() |> Some
+                    | _ -> None
+                )
+            member this.TimeStamp =
+                File.GetLastWriteTimeUtc(asm.LoadPath.Value).ToFileTimeUtc()
+            member this.WebResources =
+                asm.GetWebResources()
+            member this.DownloadableResources =
+                let rec printError (e: exn) =
+                    if isNull e.InnerException then
+                        e.Message
+                    else e.Message + " - " + printError e.InnerException 
+                let a = 
+                    let path = asm.LoadPath.Value
+                    try
+                        System.Reflection.Assembly.Load (Path.GetFileNameWithoutExtension path)
+                    with e ->
+                        eprintfn "Failed to load assembly for unpacking local resources: %s - %s" path (printError e)     
+                        null
+                if not (isNull a) then
+                    a.GetTypes() |> Seq.choose (fun t ->
+                        if t.GetInterfaces() |> Array.contains localResTyp then
+                            try
+                                Activator.CreateInstance(t) :?> Re.IDownloadableResource |> Some
+                            with e ->
+                                eprintfn "Failed to unpack local resource: %s - %s" t.FullName (printError e) 
+                                None
+                        else None
+                    )
+                else Seq.empty
+
     let Exec env cmd =
+        let baseDir =
+            let pathToSelf = typeof<Config>.Assembly.Location
+            Path.GetDirectoryName(pathToSelf)
+        let aR =
+            AssemblyResolver.Create()
+                .WithBaseDirectory(baseDir)
+                .SearchDirectories([baseDir])
+        let pc = PC.PathUtility.FileSystem(cmd.RootDirectory)
+        let aR = aR.SearchPaths(cmd.Assemblies)
+        let loader = Loader.Create aR stderr.WriteLine
+
+        let assemblies =
+            cmd.Assemblies |> Seq.choose (fun p ->
+                try Some (ReferenceAssembly (loader.LoadFile p) :> U.IAssembly)
+                with _ -> None
+            )
+        
         let baseDir =
             let pathToSelf = typeof<Config>.Assembly.Location
             Path.GetDirectoryName(pathToSelf)
         let wsRuntimePath = Path.Combine(baseDir, "cached.wsruntime") 
         U.Unpack
-            cmd.Assemblies wsRuntimePath None
+            assemblies wsRuntimePath None
             cmd.RootDirectory cmd.DownloadResources cmd.UnpackSourceMap U.ExpressionOptions.DiscardExpressions 
         |> ignore
 
         C.Ok
-
+        
     let Description =
         "unpacks resources from WebSharper assemblies"
 

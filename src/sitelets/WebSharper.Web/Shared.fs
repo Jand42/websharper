@@ -67,7 +67,7 @@ let Initialize (binDir, wwwRoot) =
             let before = System.DateTime.UtcNow
             let assemblies =
                 WebSharper.Core.Resources.AllReferencedAssemblies.Value
-                |> List.map (fun a -> a.Location)
+                |> List.map (fun a -> U.RuntimeAssembly a :> U.IAssembly)
 
             let wsRuntimePath = Path.Combine(binDir, "cached.wsruntime") 
 

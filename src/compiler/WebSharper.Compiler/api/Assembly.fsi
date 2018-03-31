@@ -26,11 +26,8 @@ open WebSharper.Core
 [<Sealed>]
 type Assembly =
 
-    /// Loads embedded non-script resources.
-    member GetContents : unit -> seq<EmbeddedFile>
-
-    /// Loads embedded script resources.
-    member GetScripts : unit -> seq<EmbeddedFile>
+    /// Gets WebResource attribute values.
+    member GetWebResources : unit -> seq<string * string>
 
     /// Returns the raw assembly data.
     member RawBytes : option<StrongNameKeyPair> -> byte []

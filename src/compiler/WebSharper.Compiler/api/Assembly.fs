@@ -73,9 +73,7 @@ module AssemblyUtility =
             if Utility.IsWebResourceAttribute attr.AttributeType.FullName then
                 match Seq.toList attr.ConstructorArguments with
                 | [StringArg resourceName; StringArg contentType] ->
-                    ReadResourceBytes resourceName def
-                    |> Option.map (fun c ->
-                        EmbeddedFile.Create(string def.FullName, resourceName, c, CT.Parse contentType))
+                    Some (resourceName, contentType)
                 | _ -> None
             else None)
     
@@ -91,6 +89,9 @@ type Assembly =
         FullLoadPath : option<string>
     }
 
+    member this.GetWebResources() =
+        ParseWebResources this.Definition   
+
     member this.LoadPath =
         this.FullLoadPath
 
@@ -102,14 +103,6 @@ type Assembly =
 
     member this.Name =
         this.Definition.Name.Name
-
-    member this.GetScripts() =
-        ParseWebResources this.Definition
-        |> Seq.filter (fun r -> r.IsScript)
-
-    member this.GetContents() =
-        ParseWebResources this.Definition
-        |> Seq.filter (fun r -> not r.IsScript)
 
     member this.OutputParameters(keyPair) =
         let par = Mono.Cecil.WriterParameters()
@@ -163,3 +156,8 @@ type Assembly =
 
     static member GetAllResources(def) =
         ParseWebResourcesUnchecked def
+        |> Seq.choose (fun (resourceName, contentType) ->
+            ReadResourceBytes resourceName def
+            |> Option.map (fun c ->
+                EmbeddedFile.Create(string def.FullName, resourceName, c, CT.Parse contentType))
+        )

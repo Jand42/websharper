@@ -64,25 +64,44 @@ let (|StringArg|_|) (attr: System.Reflection.CustomAttributeTypedArgument) =
 
 type IAssembly =
     abstract member Name : string
-    abstract member GetResource : string -> option<byte[]>
+    abstract member GetResourceStream : string -> option<Stream>
     abstract member TimeStamp : int64
+    abstract member WebResources : seq<string * string>
+    abstract member DownloadableResources : seq<Re.IDownloadableResource>
 
 type RuntimeAssembly (asm: Reflection.Assembly) =
     interface IAssembly with
         member this.Name = asm.FullName
-        member this.GetResource (name: string) = 
-            use s = asm.GetManifestResourceStream name
-            if isNull s then None else
-            use m = new MemoryStream()
-            s.CopyTo(m)
-            Some (m.ToArray())
+        member this.GetResourceStream (name: string) = 
+            asm.GetManifestResourceStream name |> Option.ofObj
         member this.TimeStamp =
             File.GetLastWriteTimeUtc(asm.Location).ToFileTimeUtc()
+        member this.WebResources =
+            asm.CustomAttributes
+            |> Seq.choose (fun attr ->
+                if IsWebResourceAttribute attr.AttributeType.FullName then
+                    match Seq.toList attr.ConstructorArguments with
+                    | [StringArg resourceName; StringArg contentType] ->
+                        Some (resourceName, contentType)
+                    | _ -> None
+                else None
+            )
 
+        member this.DownloadableResources =
+            let localResTyp = typeof<Re.IDownloadableResource>
+            asm.GetTypes() |> Seq.choose (fun t ->
+                if t.GetInterfaces() |> Array.contains localResTyp then
+                    try 
+                        System.Activator.CreateInstance(t) :?> Re.IDownloadableResource |> Some
+                    with _ -> None
+                else None
+            )
 let Unpack
-    (assemblies: list<IAssembly>) (wsRuntimePath: string) (preMerged: option<M.Info>)
+    (assemblies: seq<IAssembly>) (wsRuntimePath: string) (preMerged: option<M.Info>)
     (rootDirectory: string) (download: bool) (sourceMap: bool) (options: ExpressionOptions) =
     
+    let assemblies = List.ofSeq assemblies
+
     let failIfHeaderNotUpToDate (h: obj) =
         match h with
         | :? RuntimeHeader as header ->
@@ -149,7 +168,6 @@ let Unpack
                 emit text path
         let script = PC.ResourceKind.Script
         let content = PC.ResourceKind.Content
-        let localResTyp = typeof<Re.IDownloadableResource>
         for asm in assemblies do
             let rec printError (e: exn) =
                 if isNull e.InnerException then
@@ -157,24 +175,30 @@ let Unpack
                 else e.Message + " - " + printError e.InnerException 
                         
             unpackedAssemblies.Add(asm.Name, asm.TimeStamp)
-            asm.
-            M.IO.LoadReflected(asm) |> Option.iter metas.Add
-            let a = asm.FullName
+            
+            match asm.GetResourceStream EMBEDDED_METADATA with
+            | Some mstr ->
+                try
+                    M.IO.Decode mstr |> metas.Add
+                with _ -> () 
+            | _ -> ()
                 
             let readResource name =
-                use s = asm.GetManifestResourceStream name
-                if isNull s then None else
-                use r = new StreamReader(s)
-                Some (r.ReadToEnd())
+                asm.GetResourceStream name
+                |> Option.map (fun s ->
+                    use r = new StreamReader(s)
+                    r.ReadToEnd()
+                )
 
             let readResourceBytes name =
-                use s = asm.GetManifestResourceStream name
-                if isNull s then None else
-                use m = new MemoryStream()
-                s.CopyTo(m)
-                Some (m.ToArray())
+                asm.GetResourceStream name
+                |> Option.map (fun s ->
+                    use m = new MemoryStream()
+                    s.CopyTo(m)
+                    m.ToArray()
+                )
 
-            let aid = PC.AssemblyId.Create(a)
+            let aid = PC.AssemblyId.Create(asm.Name)
             
             emitWithMap (readResource EMBEDDED_JS) (pc.JavaScriptPath aid)
                 (readResource EMBEDDED_MAP) (pc.MapFileName aid) (pc.MapFilePath aid)
@@ -187,33 +211,23 @@ let Unpack
                 let p = pc.EmbeddedPath(PC.EmbeddedResource.Create(k, aid, fn))
                 writeBinaryFile (p, c)
                 
-            let webResources =
-                asm.CustomAttributes
-                |> Seq.choose (fun attr ->
-                    if IsWebResourceAttribute attr.AttributeType.FullName then
-                        match Seq.toList attr.ConstructorArguments with
-                        | [StringArg resourceName; StringArg contentType] ->
-                            readResourceBytes resourceName
-                            |> Option.map (fun c ->
-                                EmbeddedFile.Create(string a, resourceName, c, CT.Parse contentType))
-                        | _ -> None
-                    else None)
-
-            for r in webResources do
-                if r.IsScript then
-                    writeText script r.FileName r.Content
-                else
-                    writeBinary content r.FileName (r.GetContentData())
+            for resourceName, contentType in asm.WebResources do
+                match readResourceBytes resourceName with
+                | Some c ->
+                    let r = EmbeddedFile.Create(asm.Name, resourceName, c, CT.Parse contentType)
+                    if r.IsScript then
+                        writeText script r.FileName r.Content
+                    else
+                        writeBinary content r.FileName (r.GetContentData())
+                | _ -> ()
             
             if download then
                 try
-                    for t in asm.GetTypes() do
-                        if t.GetInterfaces() |> Array.contains localResTyp then
-                            try
-                                let res = System.Activator.CreateInstance(t) :?> Re.IDownloadableResource
-                                res.Unpack(rootDirectory)
-                            with e ->
-                                eprintfn "Failed to unpack remote resource: %s - %s" t.FullName (printError e)     
+                    for res in asm.DownloadableResources do
+                        try
+                            res.Unpack(rootDirectory)
+                        with e ->
+                            eprintfn "Failed to unpack remote resource: %s - %s" (res.GetType().FullName) (printError e)     
                 with e ->
                     eprintfn "Failed to unpack remote resources: %s" (printError e)   
                     
