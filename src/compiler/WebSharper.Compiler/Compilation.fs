@@ -70,7 +70,7 @@ type Compilation(meta: Info, ?hasGraph) =
         typ.Value.FullName.Split('.', '+') |> List.ofArray |> List.map removeGen |> List.rev 
 
     member val UseLocalMacros = true with get, set
-    member val SiteletDefinition: option<TypeDefinition> = None with get, set
+    member val SiteletDefinitions = [||] with get, set
     member val AssemblyName = "EntryPoint" with get, set
     member val AssemblyRequires = [] : list<TypeDefinition * option<obj>> with get, set
     
@@ -317,7 +317,7 @@ type Compilation(meta: Info, ?hasGraph) =
         if errors.Count > 0 && not (ignoreErrors = Some true) then 
             failwith "This compilation has errors"
         {
-            SiteletDefinition = this.SiteletDefinition 
+            SiteletDefinitions = this.SiteletDefinitions 
             Dependencies = if hasGraph then graph.GetData() else GraphData.Empty
             Interfaces = interfaces.Current
             Classes = 
@@ -329,7 +329,6 @@ type Compilation(meta: Info, ?hasGraph) =
                 )
             CustomTypes = 
                 customTypes.Current |> Dict.filter (fun _ v -> v <> NotCustomType)
-            EntryPoint = entryPoint
             MacroEntries = macroEntries.Current
             Quotations = quotations.Current
             ResourceHashes = Dictionary()
@@ -1533,13 +1532,12 @@ type Compilation(meta: Info, ?hasGraph) =
             } 
         let info =
             {
-                SiteletDefinition = this.SiteletDefinition 
+                SiteletDefinitions = this.SiteletDefinitions 
                 Dependencies = GraphData.Empty
                 Interfaces = interfaces
                 Classes = classes        
                 CustomTypes = 
                     customTypes |> Dict.filter (fun _ v -> v <> NotCustomType)
-                EntryPoint = None
                 MacroEntries = macroEntries
                 Quotations = quotations
                 ResourceHashes = Dictionary()

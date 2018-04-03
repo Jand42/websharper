@@ -28,7 +28,7 @@ open WebSharper.Core
 open WebSharper.Core.AST
 module M = WebSharper.Core.Metadata
 
-let packageAssembly (refMeta: M.Info) (current: M.Info) isBundle =
+let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint =
     let addresses = Dictionary()
     let declarations = ResizeArray()
     let statements = ResizeArray()
@@ -204,10 +204,17 @@ let packageAssembly (refMeta: M.Info) (current: M.Info) isBundle =
         classes.Remove t |> ignore
         packageClass c t.Value.FullName
 
-    if isBundle then
-        match current.EntryPoint with
-        | Some ep -> statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))
-        | _ -> failwith "Missing entry point. Add SPAEntryPoint and JavaScript attributes to a static method without arguments."
+    match entryPoint with
+    | Some (c, m) ->
+        match current.Classes.TryFind c with
+        | Some cls ->
+            match cls.Methods.TryFind m with
+            | Some (M.Static addr, _, _) ->
+                let ep = Application (GlobalAccess addr, [], NonPure, None) |> ExprStatement
+                statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))   
+            | _ -> ()
+        | _ -> ()
+    | _ -> ()
     
     let trStatements = statements |> Seq.map globalAccessTransformer.TransformStatement |> List.ofSeq
 

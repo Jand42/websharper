@@ -274,6 +274,7 @@ type AttributeReader<'A>() =
                 | A.Require (t, p) -> reqs.Add (t, p)
                 | A.Macro (m, p) -> macros.Add (m, p)
                 | A.JavaScript j -> js <- Some j
+                | A.SPAEntryPoint -> js <- Some true
                 | A.Stub -> stub <- true
                 | A.Proxy t -> proxy <- Some t
                 | A.Prototype p -> prot <- Some p

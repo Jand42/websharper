@@ -329,12 +329,11 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
     allTypes |> Seq.iter (transformClass false)
 
     {
-        SiteletDefinition = None
+        SiteletDefinitions = [||]
         Dependencies = graph.GetData()
         Interfaces = interfaces
         Classes = classes
         CustomTypes = Map.empty
-        EntryPoint = None
         MacroEntries = Map.empty
         Quotations = Map.empty
         ResourceHashes = Dictionary()

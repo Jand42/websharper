@@ -869,7 +869,6 @@ let refreshAllIds (i: Info) =
                         c.Implementations |> Dict.map (fun (x, b) -> x, r.TransformExpression b) 
                 }
             )
-        EntryPoint = i.EntryPoint |> Option.map r.TransformStatement 
     }
 
 type MaybeBuilder() =
@@ -927,7 +926,6 @@ let removeSourcePositionFromMetadata (meta: Info) =
                     Implementations = c.Implementations |> Dict.map (fun (i, e) -> i, removeSourcePos.TransformExpression e)
                 }
             )
-        EntryPoint = meta.EntryPoint |> Option.map removeSourcePos.TransformStatement
     }
 
 type TransformSourcePositions(asmName) =
@@ -972,7 +970,6 @@ let transformAllSourcePositionsInMetadata asmName (meta: Info) =
                     Implementations = c.Implementations |> Dict.map (fun (i, e) -> i, tr.TransformExpression e)
                 }
             )
-        EntryPoint = meta.EntryPoint |> Option.map tr.TransformStatement
     },
     tr.FileMap
 

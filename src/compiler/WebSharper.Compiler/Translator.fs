@@ -671,12 +671,6 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             let toJS = DotNetToJavaScript(comp)
             toJS.CompileImplementation(i, e, t, it, m)
 
-        match comp.EntryPoint with
-        | Some ep ->
-            let toJS = DotNetToJavaScript(comp)
-            comp.EntryPoint <- Some (toJS.TransformStatement(ep))
-        | _ -> ()
-
         let compileMethods() =
             while comp.CompilingMethods.Count > 0 do
                 let toJS = DotNetToJavaScript(comp)

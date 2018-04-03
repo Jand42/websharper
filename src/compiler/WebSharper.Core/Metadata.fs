@@ -273,12 +273,11 @@ type MetadataEntry =
 
 type Info =
     {
-        SiteletDefinition: option<TypeDefinition>
+        SiteletDefinitions: (TypeDefinition * option<Method>)[]
         Dependencies : GraphData
         Interfaces : IDictionary<TypeDefinition, InterfaceInfo>
         Classes : IDictionary<TypeDefinition, ClassInfo>
         CustomTypes : IDictionary<TypeDefinition, CustomTypeInfo>
-        EntryPoint : option<Statement>
         MacroEntries : IDictionary<MetadataEntry, list<MetadataEntry>>
         Quotations : IDictionary<SourcePos, TypeDefinition * Method * list<string>>
         ResourceHashes : IDictionary<string, int>
@@ -286,12 +285,11 @@ type Info =
 
     static member Empty =
         {
-            SiteletDefinition = None
+            SiteletDefinitions = [||]
             Dependencies = GraphData.Empty
             Interfaces = Map.empty
             Classes = Map.empty
             CustomTypes = Map.empty
-            EntryPoint = None
             MacroEntries = Map.empty
             Quotations = Map.empty
             ResourceHashes = Map.empty
@@ -345,16 +343,11 @@ type Info =
 
         let metas = Array.ofSeq metas
         {
-            SiteletDefinition = metas |> Seq.tryPick (fun m -> m.SiteletDefinition)
+            SiteletDefinitions = metas |> Array.collect (fun m -> m.SiteletDefinitions)
             Dependencies = GraphData.Empty
             Interfaces = Dict.union (metas |> Seq.map (fun m -> m.Interfaces))
             Classes = unionMerge (metas |> Seq.map (fun m -> m.Classes))
             CustomTypes = Dict.unionDupl (metas |> Seq.map (fun m -> m.CustomTypes))
-            EntryPoint = 
-                match metas |> Array.choose (fun m -> m.EntryPoint) with
-                | [||] -> None
-                | [| ep |] -> Some ep
-                | _ -> failwith "Multiple entry points found."
             MacroEntries = Dict.unionAppend (metas |> Seq.map (fun m -> m.MacroEntries))
             Quotations = Dict.union (metas |> Seq.map (fun m -> m.Quotations))
             ResourceHashes = Dict.union (metas |> Seq.map (fun m -> m.ResourceHashes))
@@ -371,7 +364,6 @@ type Info =
                         Implementations = ci.Implementations |> Dict.map (fun (a, _) -> a, Undefined)
                     } 
                 )
-            EntryPoint = this.EntryPoint |> Option.map (fun _ -> Empty)
         }
 
     member this.DiscardInlineExpressions() =
@@ -389,7 +381,6 @@ type Info =
                         Methods = ci.Methods |> Dict.map (fun (i, p, e) -> i, p, e |> discardInline i)
                     } 
                 )
-            EntryPoint = this.EntryPoint
         }
 
     member this.DiscardNotInlineExpressions() =
@@ -407,16 +398,14 @@ type Info =
                         Methods = ci.Methods |> Dict.map (fun (i, p, e) -> i, p, e |> discardNotInline i)
                     } 
                 )
-            EntryPoint = this.EntryPoint |> Option.map (fun _ -> Empty)
         }
 
     member this.IsEmpty =
+        this.SiteletDefinitions.Length = 0 &&
         this.Classes.Count = 0 &&
         this.CustomTypes.Count = 0 &&
         this.Interfaces.Count = 0 &&
-        this.MacroEntries.Count = 0 &&
-        this.SiteletDefinition.IsNone &&
-        this.EntryPoint.IsNone
+        this.MacroEntries.Count = 0
 
 module internal Utilities = 
  
