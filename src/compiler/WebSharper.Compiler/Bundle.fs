@@ -50,7 +50,7 @@ module Bundling =
     open WebSharper.Compiler.CommandTools
     open ExecuteCommands
 
-    let Bundle (config: WsConfig) (refMetas: M.Info list) (currentMeta: M.Info) (currentJS: Lazy<option<string * string>>) sources (refAssemblies: Assembly list) =
+    let Bundle (config: WsConfig) (refMetas: M.Info list) (currentMeta: M.Info) (currentJS: Lazy<option<string * string>>) sources (refAssemblies: Assembly list) entryPoint =
 
         let outputDir = BundleOutputDir config (GetWebRoot config)
         let fileName = Path.GetFileNameWithoutExtension config.AssemblyFile
@@ -120,7 +120,7 @@ module Bundling =
                     if dce then trimMetadata meta nodes 
                     else meta
                 try
-                    Packager.packageAssembly current current true
+                    Packager.packageAssembly current current entryPoint
                 with e -> 
                     CommandTools.argError ("Error during bundling: " + e.Message)
         let resources = graph.GetResourcesOf nodes

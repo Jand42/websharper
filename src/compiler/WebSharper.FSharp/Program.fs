@@ -246,8 +246,8 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
             | Some (_, metas, _) -> metas
             | _ -> []
         let currentJS =
-            lazy CreateBundleJSOutput (getRefMeta()) currentMeta
-        Bundling.Bundle config metas currentMeta currentJS sources refs
+            lazy CreateBundleJSOutput (getRefMeta()) currentMeta comp.EntryPoint
+        Bundling.Bundle config metas currentMeta currentJS sources refs comp.EntryPoint
         TimedStage "Bundling"
     | Some Html ->
         ExecuteCommands.Html config |> ignore

@@ -22,6 +22,8 @@ module WebSharper.Sitelets.Loading
 
 open System
 open System.Reflection
+open WebSharper.Web
+module R = WebSharper.Core.AST.Reflection
 
 type private BF = BindingFlags
 
@@ -82,8 +84,22 @@ let DiscoverSitelet(assemblies: seq<Assembly>) =
 /// Load a sitelet from the current ASP.NET application.
 let SiteletDefinition =
     Timed "Initialized sitelets" <| fun () ->
-        System.Web.Compilation.BuildManager.GetReferencedAssemblies()
-        |> Seq.cast<Assembly>
-        |> DiscoverSitelet
-        |> Option.defaultValue Sitelet.Empty
+        Shared.GetMetadata().SiteletDefinitions |> Seq.map (
+            function
+            | td, None ->
+                let ty = R.LoadTypeDefinition td
+                let a = new WebsiteAttribute(ty) 
+                a.Run() |> fst
+            | td, Some m ->
+                let ty = R.LoadTypeDefinition td
+                let p =
+                    ty.GetProperties(BF.Static ||| BF.Public ||| BF.NonPublic)
+                    |> Array.find (fun p -> p.Name = m.Value.MethodName)
+                let sitelet = p.GetGetMethod().Invoke(null, [||])
+                sitelet.GetType()
+                    .GetMethod("Box", BF.Instance ||| BF.Public)
+                    .Invoke(sitelet, [||])
+                    :?> Sitelet<obj>
+        )
+        |> Sitelet.Sum
 #endif

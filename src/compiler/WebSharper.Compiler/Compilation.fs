@@ -56,8 +56,9 @@ type Compilation(meta: Info, ?hasGraph) =
 
     let errors = ResizeArray()
     let warnings = ResizeArray() 
+    let siteletDefinitions = ResizeArray()
 
-    let mutable entryPoint = None
+    let mutable entryPoint = None : option<Statement>
 
     let macros = System.Collections.Generic.Dictionary<TypeDefinition, Macro option>()
     let generators = System.Collections.Generic.Dictionary<TypeDefinition, Generator option>()
@@ -70,7 +71,6 @@ type Compilation(meta: Info, ?hasGraph) =
         typ.Value.FullName.Split('.', '+') |> List.ofArray |> List.map removeGen |> List.rev 
 
     member val UseLocalMacros = true with get, set
-    member val SiteletDefinitions = [||] with get, set
     member val AssemblyName = "EntryPoint" with get, set
     member val AssemblyRequires = [] : list<TypeDefinition * option<obj>> with get, set
     
@@ -113,6 +113,10 @@ type Compilation(meta: Info, ?hasGraph) =
         and set ep = entryPoint <- ep 
 
     member this.Warnings = List.ofSeq warnings
+
+    member this.AddSiteletTypes defs =
+        for d in defs do
+            siteletDefinitions.Add (d, None)   
 
     member this.GetGeneratedClass() =
         match generatedClass with
@@ -317,7 +321,7 @@ type Compilation(meta: Info, ?hasGraph) =
         if errors.Count > 0 && not (ignoreErrors = Some true) then 
             failwith "This compilation has errors"
         {
-            SiteletDefinitions = this.SiteletDefinitions 
+            SiteletDefinitions = siteletDefinitions.ToArray() 
             Dependencies = if hasGraph then graph.GetData() else GraphData.Empty
             Interfaces = interfaces.Current
             Classes = 
@@ -1532,7 +1536,7 @@ type Compilation(meta: Info, ?hasGraph) =
             } 
         let info =
             {
-                SiteletDefinitions = this.SiteletDefinitions 
+                SiteletDefinitions = [||]
                 Dependencies = GraphData.Empty
                 Interfaces = interfaces
                 Classes = classes        

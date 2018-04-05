@@ -190,6 +190,7 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                     | None -> [] 
                     | Some (_, _, ids, _) -> ids
                 Warn = mAnnot.Warn
+                Sitelet = mAnnot.IsSiteletDefinition
             }
         match curriedArgs with
         | Some (mem, ca, args, inst) ->
@@ -977,7 +978,7 @@ let transformAssembly (comp : Compilation) assemblyName (config: WsConfig) (chec
     let rootTypeAnnot = asmAnnot.RootTypeAnnot
 
     comp.AssemblyRequires <- asmAnnot.Requires
-    comp.SiteletDefinition <- asmAnnot.SiteletDefinition
+    comp.AddSiteletTypes asmAnnot.SiteletDefinitions
 
     comp.CustomTypesReflector <- A.reflectCustomType
     

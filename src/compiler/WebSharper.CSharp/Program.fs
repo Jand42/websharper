@@ -168,8 +168,8 @@ let Compile config =
     match config.ProjectType with
     | Some (Bundle | BundleOnly) ->
         let currentJS =
-            lazy CreateBundleJSOutput refMeta currentMeta
-        Bundling.Bundle config metas currentMeta currentJS sources refs
+            lazy CreateBundleJSOutput refMeta currentMeta comp.EntryPoint
+        Bundling.Bundle config metas currentMeta currentJS sources refs comp.EntryPoint
         TimedStage "Bundling"
     | Some Html ->
         ExecuteCommands.Html config |> ignore

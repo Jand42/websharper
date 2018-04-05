@@ -205,15 +205,8 @@ let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint =
         packageClass c t.Value.FullName
 
     match entryPoint with
-    | Some (c, m) ->
-        match current.Classes.TryFind c with
-        | Some cls ->
-            match cls.Methods.TryFind m with
-            | Some (M.Static addr, _, _) ->
-                let ep = Application (GlobalAccess addr, [], NonPure, None) |> ExprStatement
-                statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))   
-            | _ -> ()
-        | _ -> ()
+    | Some ep ->
+        statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))
     | _ -> ()
     
     let trStatements = statements |> Seq.map globalAccessTransformer.TransformStatement |> List.ofSeq

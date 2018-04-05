@@ -208,6 +208,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
             FuncArgs = None
             Args = []
             Warn = mAnnot.Warn
+            Sitelet = mAnnot.IsSiteletDefinition
         }
 
     let addMethod mAnnot def kind compiled expr =
@@ -793,7 +794,7 @@ let transformAssembly (comp : Compilation) (config: WsConfig) (rcomp: CSharpComp
 
     comp.AssemblyName <- assembly.Name
     comp.AssemblyRequires <- asmAnnot.Requires
-    comp.SiteletDefinition <- asmAnnot.SiteletDefinition
+    comp.AddSiteletTypes asmAnnot.SiteletDefinitions
 
     comp.CustomTypesReflector <- A.reflectCustomType
 

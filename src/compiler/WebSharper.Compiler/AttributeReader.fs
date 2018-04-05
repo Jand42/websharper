@@ -48,7 +48,7 @@ type private Attribute =
     | RemotingProvider of TypeDefinition * option<obj>
     | NamedUnionCases of option<string>
     | DateTimeFormat of option<string> * string
-    | Website of TypeDefinition
+    | Website of option<TypeDefinition>
     | SPAEntryPoint
     | Prototype of bool
     | OtherAttribute
@@ -112,6 +112,7 @@ type MemberAnnotation =
         DateTimeFormat : list<option<string> * string>
         Pure : bool
         Warn : option<string>
+        IsSiteletDefinition : bool
     }
 
 type ParameterAnnotation =
@@ -131,6 +132,7 @@ module MemberAnnotation =
             DateTimeFormat = []
             Pure = false
             Warn = None
+            IsSiteletDefinition = false
         }
 
     let BasicPureJavaScript =
@@ -151,7 +153,7 @@ module MemberAnnotation =
 /// Contains information from all WebSharper-specific attributes for an assembly
 type AssemblyAnnotation =
     {
-        SiteletDefinition : option<TypeDefinition>
+        SiteletDefinitions : list<TypeDefinition>
         Requires : list<TypeDefinition * option<obj>>
         RemotingProvider : option<TypeDefinition * option<obj>>
         IsJavaScript : bool
@@ -249,7 +251,10 @@ type AttributeReader<'A>() =
             | [| a; f |] -> A.DateTimeFormat (Some (unbox a), unbox f)
             | _ -> failwith "invalid constructor arguments for DateTimeFormatAttribute"
         | "WebsiteAttribute" ->
-            A.Website (this.ReadTypeArg attr |> fst)
+            if Seq.isEmpty (this.GetCtorArgs(attr)) then
+                A.Website None
+            else
+                A.Website (Some (this.ReadTypeArg attr |> fst))
         | "SPAEntryPointAttribute" ->
             A.SPAEntryPoint
         | "PrototypeAttribute" ->
@@ -330,6 +335,7 @@ type AttributeReader<'A>() =
         let attrArr, macros, name, _, isJavaScript, _, _, isStub, reqs = this.GetAttrs (parent, attrs)
         let isEp = attrArr |> Array.contains A.SPAEntryPoint
         let isPure = attrArr |> Array.contains A.Pure
+        let isSitelet = attrArr |> Array.contains (A.Website None) 
         let warning = attrArr |> Array.tryPick (function A.Warn w -> Some w | _ -> None)
         let rp = 
             attrArr |> Array.tryPick (function A.RemotingProvider (r, p) -> Some (r, p) | _ -> None) 
@@ -364,6 +370,7 @@ type AttributeReader<'A>() =
             DateTimeFormat = attrArr |> Seq.choose (function A.DateTimeFormat (a,b) -> Some (a,b) | _ -> None) |> List.ofSeq
             Pure = isPure
             Warn = warning
+            IsSiteletDefinition = isSitelet
         }
 
     member this.GetParamAnnot (attrs: seq<'A>) =
@@ -382,7 +389,7 @@ type AttributeReader<'A>() =
    
     member this.GetAssemblyAnnot (attrs: seq<'A>) =
         let reqs = ResizeArray()
-        let mutable sitelet = None
+        let sitelets = ResizeArray()
         let mutable remotingProvider = None
         let mutable isJavaScript = false
         let jsTypesAndFiles = ResizeArray()
@@ -391,7 +398,7 @@ type AttributeReader<'A>() =
             | "WebSharper.Core" ->
                 match this.Read a with
                 | A.Require (t, p) -> reqs.Add (t, p)
-                | A.Website t -> sitelet <- Some t
+                | A.Website (Some t) -> sitelets.Add t
                 | A.RemotingProvider (t, p) -> remotingProvider <- Some (t, p)
                 | A.JavaScript true -> isJavaScript <- true
                 | A.JavaScriptTypeOrFile s -> jsTypesAndFiles.Add s
@@ -399,7 +406,7 @@ type AttributeReader<'A>() =
             | _ -> ()
              
         {
-            SiteletDefinition = sitelet
+            SiteletDefinitions = sitelets |> List.ofSeq
             Requires = reqs |> List.ofSeq
             RemotingProvider = remotingProvider
             IsJavaScript = isJavaScript

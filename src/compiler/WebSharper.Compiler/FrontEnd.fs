@@ -114,10 +114,10 @@ let TransformMetaSources assemblyName (current: M.Info) sourceMap =
     else
         removeSourcePositionFromMetadata current, [||]
 
-let CreateBundleJSOutput refMeta current =
+let CreateBundleJSOutput refMeta current entryPoint =
 
     let pkg = 
-        Packager.packageAssembly refMeta current true
+        Packager.packageAssembly refMeta current entryPoint
 
     if pkg = AST.Undefined then None else
 
@@ -138,7 +138,7 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
     TimedStage "Source position transformations"
 
     let pkg = 
-        Packager.packageAssembly refMeta current false
+        Packager.packageAssembly refMeta current None
 
     TimedStage "Packaging assembly"
     

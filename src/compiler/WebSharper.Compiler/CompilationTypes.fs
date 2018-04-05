@@ -59,6 +59,7 @@ module NotResolved =
             mutable Body : Expression
             Requires : list<TypeDefinition * option<obj>>
             Warn : option<string>
+            Sitelet : bool
         }
 
     type NotResolvedField =
