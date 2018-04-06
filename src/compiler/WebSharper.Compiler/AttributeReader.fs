@@ -251,7 +251,7 @@ type AttributeReader<'A>() =
             | [| a; f |] -> A.DateTimeFormat (Some (unbox a), unbox f)
             | _ -> failwith "invalid constructor arguments for DateTimeFormatAttribute"
         | "WebsiteAttribute" ->
-            if Seq.isEmpty (this.GetCtorArgs(attr)) then
+            if Array.isEmpty (this.GetCtorArgs(attr)) then
                 A.Website None
             else
                 A.Website (Some (this.ReadTypeArg attr |> fst))
@@ -273,7 +273,7 @@ type AttributeReader<'A>() =
         let mutable prot = None
         for a in attrs do
             match this.GetAssemblyName a with
-            | "WebSharper.Core" ->
+            | "WebSharper.Core" | "WebSharper.Sitelets" ->
                 match this.Read a with
                 | A.Name n -> name <- Some n
                 | A.Require (t, p) -> reqs.Add (t, p)
@@ -395,7 +395,7 @@ type AttributeReader<'A>() =
         let jsTypesAndFiles = ResizeArray()
         for a in attrs do
             match this.GetAssemblyName a with
-            | "WebSharper.Core" ->
+            | "WebSharper.Core" | "WebSharper.Sitelets" ->
                 match this.Read a with
                 | A.Require (t, p) -> reqs.Add (t, p)
                 | A.Website (Some t) -> sitelets.Add t

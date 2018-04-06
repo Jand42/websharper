@@ -116,7 +116,7 @@ type Compilation(meta: Info, ?hasGraph) =
 
     member this.AddSiteletTypes defs =
         for d in defs do
-            siteletDefinitions.Add (d, None)   
+            siteletDefinitions.Add (d, None)
 
     member this.GetGeneratedClass() =
         match generatedClass with
@@ -1000,6 +1000,11 @@ type Compilation(meta: Info, ?hasGraph) =
 
             for m in cls.Members do
                 
+                match m with
+                | M.Method (mdef, { Sitelet = true }) ->
+                    siteletDefinitions.Add (typ, Some mdef)
+                | _ -> ()
+
                 let strongName, isStatic, isError =  
                     match m with
                     | M.Constructor (_, { StrongName = sn; Kind = k }) 
