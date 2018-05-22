@@ -168,6 +168,7 @@ let Unpack
                 emit text path
         let script = PC.ResourceKind.Script
         let content = PC.ResourceKind.Content
+        let errors = ResizeArray()
         for asm in assemblies do
             let rec printError (e: exn) =
                 if isNull e.InnerException then
@@ -227,9 +228,9 @@ let Unpack
                         try
                             res.Unpack(rootDirectory)
                         with e ->
-                            eprintfn "Failed to unpack remote resource: %s - %s" (res.GetType().FullName) (printError e)     
+                            errors.Add <| sprintf "Failed to unpack local resource: %s - %s" (res.GetType().FullName) (printError e)     
                 with e ->
-                    eprintfn "Failed to unpack remote resources: %s" (printError e)   
+                    errors.Add <| sprintf "Failed to unpack local resources: %s" (printError e)     
                     
         let graph =
             DependencyGraph.Graph.FromData(metas |> Seq.map (fun m -> m.Dependencies))
@@ -259,4 +260,4 @@ let Unpack
 
         outStream.Close()
 
-        trimmedMeta, graph
+        trimmedMeta, graph, List.ofSeq errors

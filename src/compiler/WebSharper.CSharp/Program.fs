@@ -28,6 +28,7 @@ open WebSharper.Compiler
 
 open WebSharper.Compiler.CommandTools
 open WebSharper.Compiler.FrontEnd
+module C = WebSharper.Compiler.Commands
 
 open ErrorPrinting
 
@@ -174,12 +175,24 @@ let Compile config =
     | Some Html ->
         ExecuteCommands.Html config |> ignore
         TimedStage "Writing offline sitelets"
-    | Some Website ->
-        ExecuteCommands.Unpack config |> ignore
-        TimedStage "Unpacking"
+    | Some Website
     | _ when Option.isSome config.OutputDir ->
-        ExecuteCommands.Unpack config |> ignore
-        TimedStage "Unpacking"
+        match ExecuteCommands.GetWebRoot config with
+        | Some webRoot ->
+            let res =
+                match ExecuteCommands.Unpack webRoot config with
+                | C.Ok -> 0
+                | C.Errors errors ->
+                    if config.WarnOnly || config.DownloadResources = Some false then
+                        errors |> List.iter PrintGlobalWarning
+                        0
+                    else
+                        errors |> List.iter PrintGlobalError
+                        1
+            TimedStage "Unpacking"
+            if res = 1 then argError "" // exits without printing more errors    
+        | None ->
+            PrintGlobalError "Failed to unpack website project, no WebSharperOutputDir specified"
     | _ -> ()
 
 let rec compileMain (argv: string[]) =
