@@ -73,7 +73,12 @@ type RuntimeAssembly (asm: Reflection.Assembly) =
     interface IAssembly with
         member this.Name = asm.FullName
         member this.GetResourceStream (name: string) = 
-            asm.GetManifestResourceStream name |> Option.ofObj
+            match asm.GetManifestResourceStream name with
+            | null ->
+                let shortName = asm.FullName.Split(',').[0] 
+                asm.GetManifestResourceStream (shortName + "." + name) |> Option.ofObj
+            | s -> Some s 
+
         member this.TimeStamp =
             File.GetLastWriteTimeUtc(asm.Location).ToFileTimeUtc()
         member this.WebResources =
