@@ -134,7 +134,7 @@ let Unpack
 
     match fromFile with 
     | Some meta -> 
-        meta, DependencyGraph.Graph.FromData(meta.Dependencies)
+        meta, DependencyGraph.Graph.FromData(meta.Dependencies), []
     | _ ->
 
         if File.Exists wsRuntimePath then

@@ -71,7 +71,7 @@ let Initialize (binDir, wwwRoot) =
 
             let wsRuntimePath = Path.Combine(binDir, "cached.wsruntime") 
 
-            let m, d =
+            let m, d, _ =
                 U.Unpack
                     assemblies wsRuntimePath None
                     wwwRoot true true U.ExpressionOptions.DiscardExpressions 
