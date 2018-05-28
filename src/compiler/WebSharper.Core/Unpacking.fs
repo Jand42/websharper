@@ -41,6 +41,7 @@ type ExpressionOptions =
 type RuntimeHeader =
     {
         DownloadResources : bool
+        SettingsUsed : (string * option<string>)[]
         UseSourceMap : bool
         SourceAssemblies : (string * int64)[]
         ExpressionOptions : ExpressionOptions
@@ -103,8 +104,31 @@ type RuntimeAssembly (asm: Reflection.Assembly) =
             )
 let Unpack
     (assemblies: seq<IAssembly>) (wsRuntimePath: string) (preMerged: option<M.Info>)
-    (rootDirectory: string) (download: bool) (sourceMap: bool) (options: ExpressionOptions) =
+    (rootDirectory: string) (getSetting: string -> option<string>) =
     
+    let download =
+        match getSetting SettingKeys.UseDownloadedResources with
+        | None -> false
+        | Some s ->
+            match bool.TryParse(s) with
+            | true, v -> v
+            | _ -> false
+
+    let sourceMap =
+        match getSetting SettingKeys.WebSharperSourceMaps with
+        | None -> false
+        | Some s ->
+            match bool.TryParse(s) with
+            | true, v -> v
+            | _ -> false
+
+    let filterExpressions =
+        match getSetting SettingKeys.WebSharperSharedMetadata |> Option.map (fun s -> s.ToLower()) with
+        | Some "inlines" -> DiscardNotInlineExpressions
+        | Some "notinlines" -> DiscardInlineExpressions
+        | Some "full" | None -> FullMetadata
+        | _ -> DiscardExpressions
+
     let assemblies = List.ofSeq assemblies
 
     let failIfHeaderNotUpToDate (h: obj) =
@@ -113,7 +137,7 @@ let Unpack
             if download && not header.DownloadResources then failwith "Downloading external resources was turned on since latest unpack"        
             if sourceMap && not header.UseSourceMap then failwith "Source mapping was turned on since latest unpack"        
             if not sourceMap && header.UseSourceMap then failwith "Source mapping was turned off since latest unpack"     
-            if options <> header.ExpressionOptions then failwith "Expression kinds to keep in runtime metadata was changed since last unpack"     
+            if filterExpressions <> header.ExpressionOptions then failwith "Expression kinds to keep in runtime metadata was changed since last unpack"     
             let dlls = HashSet() 
             for a in assemblies do 
                 dlls.Add(a.Name) |> ignore
@@ -174,6 +198,24 @@ let Unpack
         let script = PC.ResourceKind.Script
         let content = PC.ResourceKind.Content
         let errors = ResizeArray()
+        let settingsUsed = Dictionary()
+        let unpackContext =
+            if download then 
+                let get x =
+                    match settingsUsed.TryGetValue(x) with
+                    | true, v -> v
+                    | false, _ ->
+                        let v = getSetting x
+                        settingsUsed.[x] <- v
+                        v
+                Some (
+                    {
+                        RootFolder = rootDirectory
+                        GetSetting = get
+                        SourceMap = sourceMap
+                    } : Resources.UnpackContext
+                )
+            else None
         for asm in assemblies do
             let rec printError (e: exn) =
                 if isNull e.InnerException then
@@ -227,15 +269,17 @@ let Unpack
                         writeBinary content r.FileName (r.GetContentData())
                 | _ -> ()
             
-            if download then
+            match unpackContext with 
+            | Some ctx ->
                 try
                     for res in asm.DownloadableResources do
                         try
-                            res.Unpack(rootDirectory)
+                            res.Unpack(ctx)
                         with e ->
                             errors.Add <| sprintf "Failed to unpack local resource: %s - %s" (res.GetType().FullName) (printError e)     
                 with e ->
-                    errors.Add <| sprintf "Failed to unpack local resources: %s" (printError e)     
+                    errors.Add <| sprintf "Failed to unpack local resources: %s" (printError e)   
+            | None -> ()
                     
         let graph =
             DependencyGraph.Graph.FromData(metas |> Seq.map (fun m -> m.Dependencies))
@@ -246,7 +290,7 @@ let Unpack
             }
 
         let trimmedMeta =
-            match options with
+            match filterExpressions with
             | FullMetadata -> fullMeta
             | DiscardExpressions -> fullMeta.DiscardExpressions() 
             | DiscardInlineExpressions -> fullMeta.DiscardInlineExpressions()
@@ -255,9 +299,10 @@ let Unpack
         let header =
             {
                 DownloadResources = download
+                SettingsUsed = settingsUsed |> Seq.map (|KeyValue|) |> Array.ofSeq  
                 UseSourceMap = sourceMap
                 SourceAssemblies = unpackedAssemblies.ToArray()
-                ExpressionOptions = options
+                ExpressionOptions = filterExpressions
             }
 
         UnpackedMetadataEncoding.Encode(outStream, trimmedMeta, header)

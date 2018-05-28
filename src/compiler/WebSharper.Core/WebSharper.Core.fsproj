@@ -21,6 +21,7 @@
     <Compile Include="Attributes.fs" />
     <Compile Include="EmbeddedResources.fs" />
     <Compile Include="Metadata.fs" />
+    <Compile Include="SettingKeys.fs" />
     <Compile Include="Resources.fsi" />
     <Compile Include="Resources.fs" />
     <Compile Include="FileSystem.fsi" />

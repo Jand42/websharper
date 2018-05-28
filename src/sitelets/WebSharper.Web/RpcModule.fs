@@ -265,7 +265,12 @@ type RpcModule() =
     interface IHttpModule with
         member this.Init(app: HttpApplication) =
             let rootFolder = HttpRuntime.AppDomainAppPath
-            Shared.Initialize(Path.Combine(rootFolder, "bin"), rootFolder)
+            let ctx = app.Context
+            let getSetting (x: string) =
+                match ctx.Items.[x] with
+                | null -> None
+                | v -> Some (v :?> string)
+            Shared.Initialize (Path.Combine(rootFolder, "bin")) rootFolder getSetting
             handler <- RpcHandler()
             let handleRequest =
                 new EventHandler(fun x e ->

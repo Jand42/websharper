@@ -57,7 +57,7 @@ let PlainJson = WebSharper.Json.ServerSideProvider
 
 let private lockObject = obj()
 
-let Initialize (binDir, wwwRoot) =
+let Initialize binDir wwwRoot getSetting =
     if data = NotInitialized then 
         lock lockObject <| fun () ->
         if data = NotInitialized then 
@@ -72,9 +72,7 @@ let Initialize (binDir, wwwRoot) =
             let wsRuntimePath = Path.Combine(binDir, "cached.wsruntime") 
 
             let m, d, _ =
-                U.Unpack
-                    assemblies wsRuntimePath None
-                    wwwRoot true true U.ExpressionOptions.DiscardExpressions 
+                U.Unpack assemblies wsRuntimePath None wwwRoot getSetting
 
             let after = System.DateTime.UtcNow
             trace.TraceInformation("Initialized WebSharper in {0} seconds.",

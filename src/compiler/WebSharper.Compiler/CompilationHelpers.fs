@@ -944,7 +944,7 @@ type TransformSourcePositions(asmName) =
             fileMap.Add(fn, res)
             res
 
-    member this.FileMap = fileMap |> Seq.map (fun (KeyValue pair) -> pair) |> Array.ofSeq
+    member this.FileMap = fileMap |> Seq.map (|KeyValue|) |> Array.ofSeq
 
     override this.TransformExprSourcePos(p, e) =
         ExprSourcePos (

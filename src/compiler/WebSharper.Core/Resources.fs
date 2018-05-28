@@ -167,8 +167,15 @@ type Context =
 and IResource =
     abstract member Render : Context -> ((RenderLocation -> HtmlTextWriter) -> unit)
 
+type UnpackContext =
+    {
+        RootFolder : string  
+        GetSetting : string -> option<string>
+        SourceMap : bool
+    }
+
 type IDownloadableResource =
-    abstract Unpack : string -> unit    
+    abstract Unpack: UnpackContext -> unit    
 
 let cleanLink dHttp (url: string) =
     if dHttp && url.StartsWith("//")
@@ -289,15 +296,15 @@ type Rendering with
         match fullAsmName with
         | None -> None
         | Some fullAsmName ->
-        match ctx.GetSetting ("WebSharper.CdnFormat." + shortName) with
+        match ctx.GetSetting (SettingKeys.CdnFormatPrefix + shortName) with
         | Some urlFormat -> Some urlFormat
         | None ->
             let isStdlib = AssemblyName(fullAsmName).GetPublicKeyToken() = thisAssemblyToken
             if isStdlib &&
-                (defaultArg (ctx.GetSetting "WebSharper.StdlibUseCdn") "false").ToLowerInvariant() = "true"
+                (defaultArg (ctx.GetSetting SettingKeys.StdlibUseCdn) "false").ToLowerInvariant() = "true"
             then
                 let def = "//cdn.websharper.com/{assembly}/{version}/{filename}"
-                Some (defaultArg (ctx.GetSetting "WebSharper.StdlibCdnFormat") def)
+                Some (defaultArg (ctx.GetSetting SettingKeys.StdlibCdnFormat) def)
             else None
         |> Option.map (fun urlFormat ->
             let asm = Assembly.Load(fullAsmName)
@@ -359,7 +366,7 @@ type BaseResource(kind: Kind) as this =
     interface IResource with
         member this.Render ctx =
             let dHttp = ctx.DefaultToHttp
-            let isLocal = ctx.GetSetting "UseDownloadedResources" |> Option.exists (fun s -> s.ToLower() = "true")
+            let isLocal = ctx.GetSetting SettingKeys.UseDownloadedResources |> Option.exists (fun s -> s.ToLower() = "true")
             let localFolder isCss f =
                 ctx.WebRoot + 
                 (if isCss then "Content/WebSharper/" else "Scripts/WebSharper/") + this.GetLocalName() + "/" + f
@@ -406,7 +413,7 @@ type BaseResource(kind: Kind) as this =
                         else script dHttp (writer Scripts) url
 
     interface IDownloadableResource with
-        member this.Unpack path =
+        member this.Unpack ctx =
             let download (paths: string list) =
                 let urls =
                     paths |> List.choose (fun p ->
@@ -419,8 +426,8 @@ type BaseResource(kind: Kind) as this =
                 if List.isEmpty urls |> not then
                     use wc = new System.Net.WebClient()    
                     let localName = this.GetLocalName()
-                    let cssDir = Path.Combine (path, "Content", "WebSharper", localName)
-                    let jsDir = Path.Combine (path, "Scripts", "WebSharper", localName)
+                    let cssDir = Path.Combine (ctx.RootFolder, "Content", "WebSharper", localName)
+                    let jsDir = Path.Combine (ctx.RootFolder, "Scripts", "WebSharper", localName)
                     for url, f in urls do
                         let localDir = if f.EndsWith ".css" then cssDir else jsDir
                         let localPath = Path.Combine(localDir, f)

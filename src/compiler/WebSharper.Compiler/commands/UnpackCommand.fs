@@ -24,6 +24,7 @@ module PC = WebSharper.PathConventions
 module C = Commands
 module Re = WebSharper.Core.Resources 
 module U = WebSharper.Core.Unpacking 
+module S = WebSharper.Core.SettingKeys
 
 module UnpackCommand =
     type Config =
@@ -144,10 +145,15 @@ module UnpackCommand =
             let pathToSelf = typeof<Config>.Assembly.Location
             Path.GetDirectoryName(pathToSelf)
         let wsRuntimePath = Path.Combine(baseDir, "cached.wsruntime") 
+        let getSettings x =
+            match x with
+            | S.UseDownloadedResources -> Some (string cmd.DownloadResources)
+            | S.WebSharperSourceMaps -> Some (string cmd.UnpackSourceMap)
+            | S.WebSharperSharedMetadata -> Some "DiscardExpressions"
+            | _ -> None
+
         let _, _, errors =
-            U.Unpack
-                assemblies wsRuntimePath None
-                cmd.RootDirectory cmd.DownloadResources cmd.UnpackSourceMap U.ExpressionOptions.DiscardExpressions 
+            U.Unpack assemblies wsRuntimePath None cmd.RootDirectory getSettings
 
         match errors with
         | [] -> C.Ok

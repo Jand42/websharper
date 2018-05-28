@@ -85,7 +85,7 @@ and Context =
         /// Assembly names are short, such as FSharp.Core.
         GetAssemblyRendering : string -> Rendering
 
-        /// Provides a configuration settings collection.
+        /// Function to look up configuration settings.
         GetSetting : string -> option<string>
 
         /// Constructs URLs to point to embedded resources.
@@ -110,11 +110,22 @@ and IResource =
 /// A resource value appending nothing.
 val EmptyResource : IResource
 
+/// The input object for IDownloadableResource.Unpack.
+type UnpackContext =
+    {
+        /// The WebSharper output root directory.
+        RootFolder : string
+        /// Function to look up configuration settings.
+        GetSetting : string -> option<string>
+        /// Is source mapping on for WebSharper output.
+        SourceMap : bool
+    }
+
 /// An interface for resources to execute custom unpack.
 type IDownloadableResource =
 
-    /// Gets the WebSharper output root directory.
-    abstract Unpack : string -> unit    
+    /// Implement to extract resources to web folder.
+    abstract Unpack : UnpackContext -> unit    
 
 /// A helper base class for resource-defining types.
 type BaseResource =
