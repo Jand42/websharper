@@ -206,7 +206,11 @@ type HttpModule() =
         member this.Init app =
             let appPath = HttpRuntime.AppDomainAppVirtualPath
             let rootFolder = HttpRuntime.AppDomainAppPath
-            Shared.Initialize(Path.Combine(rootFolder, "bin"), rootFolder)
+            let getSetting x =
+                match app.Context.Items.[x] with
+                | null -> None
+                | s -> Some (string s)
+            Shared.Initialize (Path.Combine(rootFolder, "bin")) rootFolder getSetting
             runtime <- Some (
                 Loading.SiteletDefinition,
                 ResourceContext.ResourceContext appPath,

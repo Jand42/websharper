@@ -71,8 +71,11 @@ let Initialize binDir wwwRoot getSetting =
 
             let wsRuntimePath = Path.Combine(binDir, "cached.wsruntime") 
 
-            let m, d, _ =
+            let m, d, errors =
                 U.Unpack assemblies wsRuntimePath None wwwRoot getSetting
+
+            for e in errors do
+                trace.TraceInformation("Error during WebSharper initialization: " + e)
 
             let after = System.DateTime.UtcNow
             trace.TraceInformation("Initialized WebSharper in {0} seconds.",
