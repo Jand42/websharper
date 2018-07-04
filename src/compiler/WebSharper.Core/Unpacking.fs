@@ -138,17 +138,20 @@ let Unpack
             if sourceMap && not header.UseSourceMap then failwith "Source mapping was turned on since latest unpack"        
             if not sourceMap && header.UseSourceMap then failwith "Source mapping was turned off since latest unpack"     
             if filterExpressions <> header.ExpressionOptions then failwith "Expression kinds to keep in runtime metadata was changed since last unpack"     
-            let dlls = HashSet() 
+            let asms = Dictionary() 
             for a in assemblies do 
-                dlls.Add(a.Name) |> ignore
+                asms.Add(a.Name, a) |> ignore
             for (a, ts) in header.SourceAssemblies do
-                if not <| dlls.Remove(a) then
+                match asms.TryGetValue(a) with
+                | true, asm ->
+                    if asm.TimeStamp <> ts then
+                        failwithf "Assembly %s has different timestamp than latest unpack" a 
+                    asms.Remove(a) |> ignore
+                | _ ->
                     failwithf "Assembly %s was removed since latest unpack" a 
-                // TODO check timestamp
-
-            if dlls.Count > 0 then
-                let a = Seq.head dlls   
-                failwithf "Assembly %s was added since latest unpack" a 
+            if asms.Count > 0 then
+                let a = Seq.head asms   
+                failwithf "Assembly %s was added since latest unpack" a.Key 
 
         | _ -> failwith "Could not read header from wsruntime file" 
 
