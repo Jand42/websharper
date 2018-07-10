@@ -234,7 +234,7 @@ module ExecuteCommands =
                 eprintf "%s" e
             true
     
-    let Unpack webRoot settings =
+    let Unpack webRoot settings metas =
         printfn "unpacking into %s" webRoot
         for d in ["Scripts/WebSharper"; "Content/WebSharper"] do
             let dir = DirectoryInfo(Path.Combine(webRoot, d))
@@ -260,6 +260,7 @@ module ExecuteCommands =
                     UnpackSourceMap = settings.SourceMap
                     UnpackTypeScript = settings.TypeScript
                     DownloadResources = Option.isSome settings.DownloadResources
+                    Metadatas = metas 
             }
         let env = Compiler.Commands.Environment.Create()
         Compiler.UnpackCommand.Instance.Execute(env, cfg)

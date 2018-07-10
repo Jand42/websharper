@@ -179,8 +179,9 @@ let Compile config =
     | _ when Option.isSome config.OutputDir ->
         match ExecuteCommands.GetWebRoot config with
         | Some webRoot ->
+            let metas = Seq.append metas [ currentMeta ] 
             let res =
-                match ExecuteCommands.Unpack webRoot config with
+                match ExecuteCommands.Unpack webRoot config metas with
                 | C.Ok -> 0
                 | C.Errors errors ->
                     if config.WarnOnly || config.DownloadResources = Some false then

@@ -30,6 +30,7 @@ module UnpackCommand =
             UnpackSourceMap : bool
             UnpackTypeScript : bool
             DownloadResources : bool
+            Metadatas : seq<WebSharper.Core.Metadata.Info>
         }
 
         static member Create : unit -> Config

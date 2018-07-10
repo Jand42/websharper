@@ -34,6 +34,7 @@ module UnpackCommand =
             UnpackSourceMap : bool
             UnpackTypeScript : bool
             DownloadResources : bool
+            Metadatas : seq<WebSharper.Core.Metadata.Info>
         }
 
         static member Create() =
@@ -43,6 +44,7 @@ module UnpackCommand =
                 UnpackSourceMap = false
                 UnpackTypeScript = false
                 DownloadResources = false
+                Metadatas = []
             }
 
     let GetErrors config =
@@ -153,7 +155,7 @@ module UnpackCommand =
             | _ -> None
 
         let _, _, errors =
-            U.Unpack assemblies wsRuntimePath None cmd.RootDirectory getSettings
+            U.Unpack assemblies wsRuntimePath (Some cmd.Metadatas) cmd.RootDirectory getSettings
 
         match errors with
         | [] -> C.Ok

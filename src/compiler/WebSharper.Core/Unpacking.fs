@@ -103,7 +103,7 @@ type RuntimeAssembly (asm: Reflection.Assembly) =
                 else None
             )
 let Unpack
-    (assemblies: seq<IAssembly>) (wsRuntimePath: string) (preMerged: option<M.Info>)
+    (assemblies: seq<IAssembly>) (wsRuntimePath: string) (compMetas: option<seq<M.Info>>)
     (rootDirectory: string) (getSetting: string -> option<string>) =
     
     let download =
@@ -227,12 +227,13 @@ let Unpack
                         
             unpackedAssemblies.Add(asm.Name, asm.TimeStamp)
             
-            match asm.GetResourceStream EMBEDDED_METADATA with
-            | Some mstr ->
-                try
-                    M.IO.Decode mstr |> metas.Add
-                with _ -> () 
-            | _ -> ()
+            if Option.isNone compMetas then
+                match asm.GetResourceStream EMBEDDED_METADATA with
+                | Some mstr ->
+                    try
+                        M.IO.Decode mstr |> metas.Add
+                    with _ -> () 
+                | _ -> ()
                 
             let readResource name =
                 asm.GetResourceStream name
@@ -284,20 +285,26 @@ let Unpack
                     errors.Add <| sprintf "Failed to unpack local resources: %s" (printError e)   
             | None -> ()
                     
-        let graph =
-            DependencyGraph.Graph.FromData(metas |> Seq.map (fun m -> m.Dependencies))
-        let fullMeta =
-            { 
-                M.Info.UnionWithoutDependencies metas with
-                    Dependencies = graph.GetData()
-            }
+        match compMetas with
+        | Some ms -> ms |> Seq.iter metas.Add
+        | _ -> ()
 
-        let trimmedMeta =
-            match filterExpressions with
-            | FullMetadata -> fullMeta
-            | DiscardExpressions -> fullMeta.DiscardExpressions() 
-            | DiscardInlineExpressions -> fullMeta.DiscardInlineExpressions()
-            | DiscardNotInlineExpressions -> fullMeta.DiscardNotInlineExpressions()
+        let meta, graph =
+            let graph =
+                DependencyGraph.Graph.FromData(metas |> Seq.map (fun m -> m.Dependencies))
+            let fullMeta =
+                { 
+                    M.Info.UnionWithoutDependencies metas with
+                        Dependencies = graph.GetData()
+                }
+            let trimmedMeta =
+                match filterExpressions with
+                | FullMetadata -> fullMeta
+                | DiscardExpressions -> fullMeta.DiscardExpressions() 
+                | DiscardInlineExpressions -> fullMeta.DiscardInlineExpressions()
+                | DiscardNotInlineExpressions -> fullMeta.DiscardNotInlineExpressions()
+            
+            trimmedMeta, graph
         
         let header =
             {
@@ -308,9 +315,9 @@ let Unpack
                 ExpressionOptions = filterExpressions
             }
 
-        UnpackedMetadataEncoding.Encode(outStream, trimmedMeta, header)
+        UnpackedMetadataEncoding.Encode(outStream, meta, header)
         printfn "Saved precomputed metadata: %s" wsRuntimePath
 
         outStream.Close()
 
-        trimmedMeta, graph, List.ofSeq errors
+        meta, graph, List.ofSeq errors
