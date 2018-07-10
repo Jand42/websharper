@@ -306,6 +306,7 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
     let mutable currentFuncArgs = None
     let mutable cctorCalls = Set.empty
     let labelCctors = Dictionary()
+    let boundVars = Dictionary()
 
     let innerScope f = 
         let cc = cctorCalls
@@ -360,18 +361,31 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             |> breaker.TransformExpression
             |> runtimeCleanerForced.TransformExpression
             |> collectCurried isCtor
-    
+
+    let breakStatement e = 
+        e 
+        |> removeLetsTr.TransformStatement
+        |> runtimeCleaner.TransformStatement
+        |> breaker.TransformStatement
+        |> runtimeCleanerForced.TransformStatement
+        |> collectCurriedTr.TransformStatement
+
     let getCurrentName() =
         match currentNode with
         | M.MethodNode (td, m) -> td.Value.FullName + "." + m.Value.MethodName
         | M.ConstructorNode (td, c) -> td.Value.FullName + "..ctor"
         | M.ImplementationNode (td, i, m) -> td.Value.FullName + ":" + i.Value.FullName + "." + m.Value.MethodName
         | M.TypeNode td -> td.Value.FullName + "..cctor"
+        | M.ExtraBundleEntryPointNode(_, n) -> "worker \"" + n + "\""
         | _ -> "unknown"
 
     member this.CheckResult (res) =
         if hasDelayedTransform then res else
             CheckNoInvalidJSForms(comp, currentIsInline, getCurrentName).TransformExpression res
+
+    member this.CheckResult (res) =
+        if hasDelayedTransform then res else
+            CheckNoInvalidJSForms(comp, currentIsInline, getCurrentName).TransformStatement res
      
     member this.Generate(g, p, m) =
         match comp.GetGeneratorInstance(g) with
@@ -615,6 +629,8 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 comp.FailedCompiledConstructor(typ, ctor)
             else
             currentIsInline <- isInline info
+            // for Error inheritance, using restorePrototype
+            selfAddress <- comp.TryLookupClassInfo(typ) |> Option.bind (fun cls -> cls.Address)
             match info with
             | NotCompiled (i, _, opts) -> 
                 currentFuncArgs <- opts.FuncArgs
@@ -655,6 +671,14 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             let res = this.Error(sprintf "Unexpected error during JavaScript compilation: %s at %s" e.Message e.StackTrace)
             comp.AddCompiledStaticConstructor(typ, addr, res)
 
+    member this.CompileEntryPoint(stmt, node) =
+        try
+            currentNode <- node
+            this.TransformStatement(stmt) |> breakStatement |> this.CheckResult
+        with e ->
+            this.Error(sprintf "Unexpected error during JavaScript compilation: %s at %s" e.Message e.StackTrace)
+            |> ExprStatement
+
     static member CompileFull(comp: Compilation) =
         while comp.CompilingConstructors.Count > 0 do
             let (KeyValue((t, c), (i, e))) = Seq.head comp.CompilingConstructors
@@ -671,11 +695,27 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             let toJS = DotNetToJavaScript(comp)
             toJS.CompileImplementation(i, e, t, it, m)
 
-        let compileMethods() =
+        match comp.EntryPoint with
+        | Some ep ->
+            let toJS = DotNetToJavaScript(comp)
+            comp.EntryPoint <- Some (toJS.TransformStatement(ep))
+        | _ -> ()
+
+        let rec compileMethods() =
             while comp.CompilingMethods.Count > 0 do
                 let toJS = DotNetToJavaScript(comp)
                 let (KeyValue((t, m), (i, e))) = Seq.head comp.CompilingMethods
                 toJS.CompileMethod(i, e, t, m)
+
+            while comp.CompilingExtraBundles.Count > 0 do
+                let toJS = DotNetToJavaScript(comp)
+                let (KeyValue(k, bundle)) = Seq.head comp.CompilingExtraBundles
+                let compiledEntryPoint = toJS.CompileEntryPoint(bundle.EntryPoint, bundle.Node)
+                comp.AddCompiledExtraBundle(k, compiledEntryPoint)
+
+            // both CompileMethod can add bundles and CompileEntryPoint can add methods,
+            // so we need to loop until both are exhausted.
+            if comp.CompilingMethods.Count > 0 then compileMethods()
 
         compileMethods()
         comp.CloseMacros()
@@ -836,6 +876,7 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                             Parameter = parameter |> Option.map M.ParameterObject.ToObj
                             IsInline = currentIsInline
                             Compilation = comp
+                            BoundVars = boundVars
                         }
                     with e -> MacroError (e.Message + " at " + e.StackTrace) 
                 | _ -> 
@@ -869,6 +910,9 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                         Call(trThisObj(), typ, meth, trArgs())
                     else 
                         this.HandleMacroNeedsResolvedTypeArg(t, macro.Value.FullName)
+                | MacroUsedBoundVar (v, mres) ->
+                    boundVars.Remove v |> ignore
+                    getExpr mres
             getExpr macroResult
         | M.Remote (kind, handle, rh) ->
             let name, mnode =
@@ -1077,12 +1121,13 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 | Some m ->
                     try
                         m.TranslateCtor {
-                             DefiningType = typ
-                             Constructor = ctor
-                             Arguments = args
-                             Parameter = parameter |> Option.map M.ParameterObject.ToObj
-                             IsInline = currentIsInline
-                             Compilation = comp
+                            DefiningType = typ
+                            Constructor = ctor
+                            Arguments = args
+                            Parameter = parameter |> Option.map M.ParameterObject.ToObj
+                            IsInline = currentIsInline
+                            Compilation = comp
+                            BoundVars = boundVars
                         }
                     with e -> MacroError (e.Message + " at " + e.StackTrace)  
                 | _ -> MacroError "Macro type failed to load"
@@ -1109,6 +1154,9 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                         Ctor(typ, ctor, trArgs())
                     else 
                         this.HandleMacroNeedsResolvedTypeArg(t, macro.Value.FullName)
+                | MacroUsedBoundVar (v, mres) ->
+                    boundVars.Remove v |> ignore
+                    getExpr mres
             getExpr macroResult
         | _ -> this.Error("Invalid metadata for constructor.")
 
@@ -1323,6 +1371,8 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             // This is allowing some simple inlines
             | Let (i1, a1, New(func, [Var v1])) when i1 = v1 ->
                 Application(func |> getItem "call", expr :: [a1], NonPure, None)
+            | Let (i1, a1, Let (i2, a2, New(func, [Var v1; Var v2]))) when i1 = v1 && i2 = v2 ->
+                Application(func |> getItem "call", expr :: [a1; a2], NonPure, None)
             | _ ->
                 comp.AddError (this.CurrentSourcePos, SourceError "Chained constructor is an Inline in a not supported form")
                 Application(errorPlaceholder, args |> List.map this.TransformExpression, NonPure, None)
@@ -1449,6 +1499,17 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             | selfName :: _ -> GlobalAccess self
             | _ -> this.Error ("Self address empty")
         | _ -> this.Error ("Self address missing")
+
+    override this.TransformLet (a, b, c) =
+        if CountVarOccurence(a).Get(c) = 1 then
+            boundVars.Add(a, b)
+            let trC = this.TransformExpression(c)
+            if boundVars.Remove a then
+                let trB = this.TransformExpression(b)
+                Let(a, trB, trC)
+            else trC
+        else
+            base.TransformLet(a, b, c)
 
     override this.TransformFieldGet (expr, typ, field) =
         if comp.HasGraph then

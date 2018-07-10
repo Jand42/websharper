@@ -238,19 +238,34 @@ namespace WebSharper.CSharp.Tests
             int x = 0;
             Increment(ref x);
             Equal(x, 1);
-#if CSHARP7
             int xr = InRefOut(x);
             Equal(xr, 1);
             OutOne(out var y);
             Equal(y, 1);
             OutOne(out int z);
             Equal(z, 1);
-#endif
             var a = new[] { 2 };
             Increment(ref a[0]);
             Equal(a[0], 3);
             Increment(ref f);
             Equal(f, 1);
+        }
+
+        [Test]
+        public void RefLocals()
+        {
+            int x = 0;
+            int y = 0;
+            ref var r = ref x;
+            r++;
+            Equal(x, 1);
+            r = ref y;
+            r--;
+            Equal(y, -1);
+            x = r = 2;
+            r += 2;
+            Equal(x, 2);
+            Equal(y, 4);
         }
 
         class Cat
@@ -318,14 +333,7 @@ namespace WebSharper.CSharp.Tests
         public int field = 4;
         public int fieldDefVal;
         public int Prop { get; set; } = 5;
-#if CSHARP7
         public int PropDupl { get => Prop; set => Prop = value; }
-#else
-        public int PropDupl {
-            get { return Prop; }
-            set { Prop = value; }
-        }
-#endif
         public int PropDefVal { get; set; }
         public int RenamedProp { [Name("RnProp")] get; [Name("setRnProp")] set; } = 6;
         [Name("RnProp2")]
@@ -426,50 +434,35 @@ namespace WebSharper.CSharp.Tests
             );
         }
 
-        class MyNumber
-        {
-            public double val;
-            public MyNumber(double d) { val = d; }
-
-            public double Value => val;
-
-            public static implicit operator double(MyNumber d)
-            {
-                return d.val;
-            }
-            public static implicit operator MyNumber(double d)
-            {
-                return new MyNumber(d);
-            }
-            public static MyNumber operator +(MyNumber a, MyNumber b)
-            {
-                return a.Value + b.Value;
-            }
-        }
-
         [Test]
         public void Conversions()
         {
-            Console.WriteLine("Running Conversions test..");
-
             int intFromChar = 'a';
-            Equal(intFromChar, 97, "char to int implicit");
-            Equal((int)'a', 97, "char to int explicit");
+            StrictEqual(intFromChar, 97, "char to int implicit");
+            StrictEqual((int)'a', 97, "char to int explicit");
 
-            Equal((char)97, 'a', "int to char explicit");
+            StrictEqual((char)97, 'a', "int to char explicit");
 
             double intFromFloat = 3.2;
-            Equal((int)intFromFloat, 3, "float to int explicit");
+            StrictEqual((int)intFromFloat, 3, "float to int explicit");
 
             MyNumber custom = 12 + 1;
-            Equal(custom.Value, 13.0, "Custom implicit conversion in");
+            StrictEqual(custom.Value, 13.0, "Custom implicit conversion in");
             double val = custom;
-            Equal(val, 13.0, "Custom implicit conversion out");
-            Equal((double)custom, 13.0, "Custom explicit conversion out");
+            StrictEqual(val, 13.0, "Custom implicit conversion out");
+            StrictEqual((double)custom, 13.0, "Custom explicit conversion out");
             MyNumber addTest = custom + 1;
-            Equal(addTest.Value, 14.0, "Operator overloading");
+            StrictEqual(addTest.Value, 14.0, "Operator overloading");
 
-            JavaScript.Console.Log("Conversions test", "finished");
+            unchecked
+            {
+                StrictEqual((byte)-55, 201, "byte truncates, unchecked C#");
+                StrictEqual((sbyte)1000, -24, "sbyte truncates, unchecked C#");
+                StrictEqual((Int16)100000, -31072, "Int16 truncates, unchecked C#");
+                StrictEqual((UInt16)100000, 34464, "UInt16 truncates, unchecked C#");
+                StrictEqual((int)1000000000000, -727379968, "int truncates, unchecked C#");
+                StrictEqual((uint)1000000000000, 3567587328, "uint truncates, unchecked C#");
+            }
         }
 
         [Test]
@@ -521,6 +514,69 @@ namespace WebSharper.CSharp.Tests
             IsTrue(d1.HasFlag(Days.Sat));
             IsTrue(d1.GetHashCode() == d1.GetHashCode());
             IsTrue(d1.GetHashCode() != d2.GetHashCode());
+        }
+
+        public class ExprVarCtorB
+        {
+            public ExprVarCtorB(int i, out int j)
+            {
+                j = i;
+            }
+        }
+
+        public class ExprVarCtorD : ExprVarCtorB
+        {
+            public ExprVarCtorD(int i, out int k) : base(i, out var j)
+            {
+                k = j;
+            }
+        }
+
+        public int ExprVarField = int.TryParse("42", out var i) ? i : 0;
+
+        public int ExprVarProp { get; set; } = int.TryParse("42", out var i) ? i : 0; 
+
+        [Test]
+        public void ExpressionVariables()
+        {
+            var d = new ExprVarCtorD(5, out var x);
+            Equal(x, 5, "expression variable in constructor initializer");
+
+            var strings = new string[] { "5" };
+
+            Equal(ExprVarField, 42, "expression variable in field initializer");
+            Equal(ExprVarProp, 42, "expression variable in property initializer");
+
+            var r = from s in strings
+                    select int.TryParse(s, out var i) ? i : 0;
+
+            Equal(r.ToArray(), new[] { 5 }, "expression variable in query");
+        }
+    }
+
+    [JavaScript]
+    public class MyNumber
+    {
+        public double val;
+        public MyNumber(double d) { val = d; }
+
+        public double Value => val;
+
+        public static implicit operator double(MyNumber d)
+        {
+            return d.val;
+        }
+        public static implicit operator MyNumber(double d)
+        {
+            return new MyNumber(d);
+        }
+        public static MyNumber operator +(MyNumber a, MyNumber b)
+        {
+            return a.Value + b.Value;
+        }
+        public override string ToString()
+        {
+            return val.ToString();
         }
     }
 

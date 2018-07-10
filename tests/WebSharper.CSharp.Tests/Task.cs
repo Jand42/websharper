@@ -70,7 +70,6 @@ namespace WebSharper.CSharp.Tests
             IsTrue(Counter < 5);
         }
 
-#if CSHARP7
         [Test("Local async function")]
         public async void LocalAsync()
         {
@@ -83,6 +82,46 @@ namespace WebSharper.CSharp.Tests
             var one = await GetOneAsyncLocal();
             Equal(one, 1);
         }
-#endif
+
+        [Test("Result")]
+        public void Result()
+        {
+            Equal(Task.FromResult<int>(1).Result, 1);
+            Raises(() => Task.FromException<int>(new Exception()).Result);
+            Raises(() => new Task<int>(() => 2).Result);
+        }
+
+        [Test]
+        public async Task WebWorker()
+        {
+            var worker = new JavaScript.Worker(self =>
+            {
+                self.Onmessage = e =>
+                {
+                    self.PostMessage(GlobalClass.GlobalFunction((string)e.Data));
+                };
+            });
+            var t = new TaskCompletionSource<string>();
+            worker.Onmessage = e =>
+            {
+                t.SetResult("The worker replied: " + (string)e.Data);
+            };
+            worker.PostMessage("Hello world!");
+            var res = await t.Task;
+            worker.Terminate();
+            Equal(res, "The worker replied: [worker] Hello world!");
+        }
+    }
+
+    // This needs to be a separate class, otherwise the web worker bundle
+    // will include QUnit as a dependency.
+    [JavaScript]
+    public static class GlobalClass
+    {
+        public static string GlobalFunction(string s)
+        {
+            return "[worker] " + s;
+        }
+
     }
 }

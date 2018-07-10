@@ -1,6 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="15.0" DefaultTargets="Build">
+  <Import Project="..\..\packages\compilers\Microsoft.Net.Compilers\build\Microsoft.Net.Compilers.props" Condition="Exists('..\..\packages\compilers\Microsoft.Net.Compilers\build\Microsoft.Net.Compilers.props')" Label="Paket" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <Import Project="..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform>AnyCPU</Platform>
@@ -19,12 +21,15 @@
     <IISExpressWindowsAuthentication />
     <IISExpressUseClassicPipelineMode />
     <OutputPath>bin\</OutputPath>
+    <WebProjectOutputDir>$(MSBuildThisFileDirectory)</WebProjectOutputDir>
+    <WebSharperProject>Website</WebSharperProject>
     <WebSharperTypeScriptDeclaration>True</WebSharperTypeScriptDeclaration>
     <WebSharperDownloadResources>True</WebSharperDownloadResources>
     <FSharp40>True</FSharp40>
     <UseGlobalApplicationHostFile />
     <Use64BitIISExpress />
     <TargetFrameworkProfile />
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <PropertyGroup>
     <DebugType>pdbonly</DebugType>
@@ -84,6 +89,14 @@
     <ProjectReference Include="..\..\src\stdlib\WebSharper.JQuery\WebSharper.JQuery.fsproj">
       <Project>{730ae40a-001c-4137-972d-898dc7c2bf0a}</Project>
       <Name>WebSharper.JQuery</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\stdlib\WebSharper.MathJS.Extensions\WebSharper.MathJS.Extensions.fsproj">
+      <Project>{e4b66fc3-0227-481a-9fa0-eb7a0bf66bac}</Project>
+      <Name>WebSharper.MathJS.Extensions</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\stdlib\WebSharper.MathJS\WebSharper.MathJS.fsproj">
+      <Project>{927a30b7-9316-4374-8526-a011234638b9}</Project>
+      <Name>WebSharper.MathJS</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Testing\WebSharper.Testing.fsproj">
       <Project>{a7f7a74b-d0ee-4918-8a54-280fc7d2a30c}</Project>
@@ -179,16 +192,16 @@
     <When Condition="$(TargetFrameworkIdentifier) == '.NETFramework' And ($(TargetFrameworkVersion) == 'v4.6' Or $(TargetFrameworkVersion) == 'v4.6.1')">
       <ItemGroup>
         <Reference Include="FSharp.Core">
-          <HintPath>..\..\..\..\..\Users\jenkins.WIN-DRS439ROKOT\.nuget\packages\fsharp.core\4.2.2\lib\net45\FSharp.Core.dll</HintPath>
+          <HintPath>..\..\packages\compilers\FSharp.Core\lib\net45\FSharp.Core.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>
       </ItemGroup>
     </When>
-    <When Condition="$(TargetFrameworkIdentifier) == '.NETStandard' And $(TargetFrameworkVersion) == 'v2.0'">
+    <When Condition="($(TargetFrameworkIdentifier) == '.NETCoreApp' And $(TargetFrameworkVersion) == 'v2.0') Or ($(TargetFrameworkIdentifier) == '.NETStandard' And $(TargetFrameworkVersion) == 'v2.0')">
       <ItemGroup>
         <Reference Include="FSharp.Core">
-          <HintPath>..\..\..\..\..\Users\jenkins.WIN-DRS439ROKOT\.nuget\packages\fsharp.core\4.2.2\lib\netstandard1.6\FSharp.Core.dll</HintPath>
+          <HintPath>..\..\packages\compilers\FSharp.Core\lib\netstandard1.6\FSharp.Core.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>

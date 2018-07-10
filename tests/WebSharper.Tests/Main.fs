@@ -27,7 +27,7 @@ open WebSharper.Testing
 do()
 
 [<JavaScript>]
-let RunTests() =
+let RunTests runServerSide =
     Test "non-categorized test" {
         equal 1 1
     }
@@ -38,6 +38,7 @@ let RunTests() =
         Async.Tests
         Basis.Tests
         Char.Tests
+        Conversions.Tests
         DateTime.Tests
         DateTime.NativeTests
         Delegate.Tests
@@ -52,12 +53,14 @@ let RunTests() =
         List.Tests
         Macro.Tests
         Math.Tests
+        MathJS.Tests runServerSide
         Nullable.Tests
         Object.Tests
         ObjExpr.Tests
         Operators.Tests
         Option.Tests
         Optimizations.Tests
+        Promise.Tests
         Proxy.Tests
         Queue.Tests
         Query.Tests
@@ -76,6 +79,6 @@ let RunTests() =
         WIG.Tests
         Cookies.Tests
 #if NET461
-        Compiler.Tests
+        (if runServerSide then Compiler.Tests else TestCategory "Compiler" { do () })
 #endif
     |]

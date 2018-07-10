@@ -97,4 +97,12 @@ let Tests =
             ) ("OOPS", 2)            
         }
 
+        Test "Inheritance" {
+            isTrue (box (System.ArgumentException()) :? exn)
+            isTrue (box E0 :? exn)
+            isTrue (box (E1 42) :? exn)
+            isTrue (box (E2(10, "a")) :? exn)
+            isTrue (box (E3("a")) :? exn)
+        }
+
     }

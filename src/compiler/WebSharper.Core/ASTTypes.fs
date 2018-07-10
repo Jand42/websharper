@@ -336,6 +336,12 @@ module Definitions =
             FullName = "System.Boolean"
         }
 
+    let Char =
+        TypeDefinition {
+            Assembly = "netstandard"
+            FullName = "System.Char"
+        }
+
     let UInt8 =
         TypeDefinition {
             Assembly = "netstandard"
@@ -415,6 +421,12 @@ module Definitions =
         TypeDefinition {
             Assembly = "FSharp.Core"
             FullName = "Microsoft.FSharp.Core.FSharpChoice`" + string arity
+        }
+    
+    let Decimal =
+        TypeDefinition {
+            Assembly = "netstandard"
+            FullName = "System.Decimal"
         }
 
 /// Stores a definition and type parameter information
@@ -589,6 +601,22 @@ and Type =
         | StaticTypeParameter _ 
         | LocalTypeParameter -> this
 
+    member this.MapTypeDefinitions(mapping) =
+        match this with 
+        | ConcreteType t -> 
+            ConcreteType { 
+                Generics = t.Generics |> List.map (fun p -> p.MapTypeDefinitions mapping)
+                Entity = mapping t.Entity 
+            }
+        | TypeParameter i
+        | StaticTypeParameter i -> this
+        | ArrayType (t, i) -> ArrayType (t.MapTypeDefinitions mapping, i)
+        | TupleType (ts, v) -> TupleType (ts |> List.map (fun p -> p.MapTypeDefinitions mapping), v) 
+        | FSharpFuncType (a, r) -> FSharpFuncType (a.MapTypeDefinitions mapping, r.MapTypeDefinitions mapping)
+        | ByRefType t -> ByRefType (t.MapTypeDefinitions mapping)
+        | VoidType -> this
+        | LocalTypeParameter -> ConcreteType { Entity = Definitions.Object; Generics = [] }
+
     static member IsGenericCompatible(t1, t2) =
         match t1, t2 with
         | (StaticTypeParameter _ | LocalTypeParameter | TypeParameter _), _
@@ -648,7 +676,7 @@ type Address = Hashed<list<string>>
 module private Instances =
     let GlobalId =
         {
-            IdName = Some "window"
+            IdName = Some "self"
             Id = -1L
             Mutable = false
             Tuple = false
@@ -776,11 +804,11 @@ module Reflection =
 
     let LoadType (t: Type) =
         try System.Type.GetType(t.AssemblyQualifiedName, true)  
-        with _ -> failwithf "Failed to load type %s" t.AssemblyQualifiedName
+        with e -> failwithf "Failed to load type %s: %O" t.AssemblyQualifiedName e
 
     let LoadTypeDefinition (td: TypeDefinition) =
         try System.Type.GetType(td.Value.AssemblyQualifiedName, true)   
-        with _ -> failwithf "Failed to load type %s from assembly %s" td.Value.FullName td.Value.Assembly
+        with e -> failwithf "Failed to load type %s from assembly %s: %O" td.Value.FullName td.Value.Assembly e
 
     let [<Literal>] AllMethodsFlags = 
         System.Reflection.BindingFlags.Instance

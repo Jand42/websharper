@@ -337,6 +337,7 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
         MacroEntries = Map.empty
         Quotations = Map.empty
         ResourceHashes = Dictionary()
+        ExtraBundles = Set.empty
     }
 
 let TransformAssembly prototypes assembly =

@@ -603,11 +603,9 @@ let serializers =
     add encGuid decGuid d   
     let encDecimal (d: decimal) =
         let b = System.Decimal.GetBits(d)
-        EncodedInstance (
+        EncodedArrayInstance (
             AST.Address [ "Decimal"; "WebSharper" ], 
-            [
-                "bits", EncodedArray (b |> Seq.map (string >> EncodedNumber) |> List.ofSeq)
-            ]
+            b |> Seq.map (string >> EncodedNumber) |> List.ofSeq
         )
     let decDecimal = function
         | Object [ "mathjs", String "BigNumber"; "value", String d ] as x ->
@@ -1087,6 +1085,10 @@ let fieldFlags =
     ||| System.Reflection.BindingFlags.Public
     ||| System.Reflection.BindingFlags.NonPublic
 
+let fieldFlagsDeclOnly =
+    fieldFlags
+    ||| System.Reflection.BindingFlags.DeclaredOnly
+
 exception NoEncodingException of System.Type with
     override this.Message =
         "No JSON encoding for " + string this.Data0
@@ -1094,13 +1096,21 @@ exception NoEncodingException of System.Type with
 type FS = System.Runtime.Serialization.FormatterServices
 
 let getObjectFields (t: System.Type) =
-    t.GetFields fieldFlags
-    |> Seq.filter (fun f ->
-        let nS =
-            f.Attributes &&&
-            System.Reflection.FieldAttributes.NotSerialized
-        f.DeclaringType.IsSerializable && int nS = 0)
-    |> Seq.toArray
+    // FlattenHierarchy flag is not enough to collect
+    // backing fields of auto-properties on base classes 
+    let getDecl (t: System.Type) = 
+        t.GetFields fieldFlagsDeclOnly
+        |> Seq.filter (fun f ->
+            let nS =
+                f.Attributes &&&
+                System.Reflection.FieldAttributes.NotSerialized
+            int nS = 0
+        )
+    let rec getAll (t: System.Type) =
+        match t.BaseType with
+        | null -> Seq.empty // this is a System.Object
+        | b -> Seq.append (getAll b) (getDecl t)
+    getAll t |> Array.ofSeq
 
 let unmakeFlatDictionary<'T> (dE: obj -> Encoded) (x: obj) =
     EncodedObject [
@@ -1141,8 +1151,6 @@ let objectEncoder dE (i: FormatSettings) (ta: TAttrs) =
             callGeneric <@ unmakeFlatDictionary @> dE ta ga.[1]
         else
             callGeneric2 <@ unmakeArrayDictionary @> dE ta ga.[0] ga.[1]
-    elif not t.IsSerializable then
-        raise (NoEncodingException t)
     else
     let fs = getObjectFields t
     let ms = fs |> Array.map (fun x -> x :> System.Reflection.MemberInfo)

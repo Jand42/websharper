@@ -26,6 +26,13 @@ open WebSharper.Core.AST
 open WebSharper.Core.Metadata
 open WebSharper.Core.DependencyGraph
 open NotResolved
+
+type ExtraBundleData =
+    {
+        EntryPoint: Statement
+        Node: Node
+        IncludeJsExports: bool
+    }
     
 type Compilation(meta: Info, ?hasGraph) =    
     let notResolvedInterfaces = Dictionary<TypeDefinition, NotResolvedInterface>()
@@ -49,6 +56,8 @@ type Compilation(meta: Info, ?hasGraph) =
     let compilingConstructors = Dictionary<TypeDefinition * Constructor, CompilingMember * Expression>()
     let compilingStaticConstructors = Dictionary<TypeDefinition, Address * Expression>()
     let compilingQuotedArgMethods = Dictionary<TypeDefinition * Method, int[]>()
+    let compilingExtraBundles = Dictionary<string, ExtraBundleData>()
+    let compiledExtraBundles = Dictionary<string, ExtraBundleData>()
 
     let mutable generatedClass = None
     let mutable resolver = None : option<Resolve.Resolver>
@@ -59,6 +68,7 @@ type Compilation(meta: Info, ?hasGraph) =
     let siteletDefinitions = ResizeArray()
 
     let mutable entryPoint = None : option<Statement>
+    let jsExports = ResizeArray() 
 
     let macros = System.Collections.Generic.Dictionary<TypeDefinition, Macro option>()
     let generators = System.Collections.Generic.Dictionary<TypeDefinition, Generator option>()
@@ -80,9 +90,22 @@ type Compilation(meta: Info, ?hasGraph) =
     member val LookupMethodAttributes = fun _ _ -> None with get, set
     member val LookupConstructorAttributes = fun _ _ -> None with get, set
 
+    member this.CurrentExtraBundles =
+        Set [|
+            for KeyValue(k, _) in compiledExtraBundles do
+                yield { AssemblyName = this.AssemblyName; BundleName = k }
+        |]
+
+    member this.AllExtraBundles =
+        meta.ExtraBundles + this.CurrentExtraBundles
+
+    member this.CompiledExtraBundles =
+        compiledExtraBundles
+
     member this.MutableExternals = mutableExternals
 
     member this.FindProxied typ =
+        if proxies.Count = 0 then typ else
         match proxies.TryFind typ with
         | Some p -> p 
         | _ -> typ
@@ -111,6 +134,11 @@ type Compilation(meta: Info, ?hasGraph) =
     member this.EntryPoint
         with get () = entryPoint
         and set ep = entryPoint <- ep 
+
+    member this.JavaScriptExports = List.ofSeq jsExports
+
+    member this.AddJavaScriptExport (jsExport: JsExport) =
+        jsExports.Add jsExport
 
     member this.Warnings = List.ofSeq warnings
 
@@ -224,6 +252,9 @@ type Compilation(meta: Info, ?hasGraph) =
         member this.AddWarning(pos, msg) =
             this.AddWarning(pos, SourceWarning msg)
 
+        member this.AddBundle(name, entryPoint, includeJsExports) =
+            this.AddBundle(name, entryPoint, includeJsExports)
+
     member this.GetMacroInstance(macro) =
         match macros.TryFind macro with
         | Some res -> res
@@ -336,10 +367,41 @@ type Compilation(meta: Info, ?hasGraph) =
             MacroEntries = macroEntries.Current
             Quotations = quotations.Current
             ResourceHashes = Dictionary()
+            ExtraBundles = this.CurrentExtraBundles
         }    
 
     member this.AddProxy(tProxy, tTarget) =
         proxies.Add(tProxy, tTarget)  
+
+    member this.ResolveProxySignature (meth: Method) =        
+        if proxies.Count = 0 then meth else
+        let m = meth.Value
+        AST.Method { 
+            m with
+                Parameters = m.Parameters |> List.map (fun t -> t.MapTypeDefinitions this.FindProxied)
+                ReturnType = m.ReturnType.MapTypeDefinitions this.FindProxied
+        }
+
+    member this.ResolveProxySignature (ctor: Constructor) =        
+        if proxies.Count = 0 then ctor else
+        let c = ctor.Value
+        AST.Constructor {
+            CtorParameters = c.CtorParameters |> List.map (fun t -> t.MapTypeDefinitions this.FindProxied)
+        }
+
+    member this.ResolveProxySignature (mem: Member) =        
+        if proxies.Count = 0 then mem else
+        match mem with
+        | Member.Method (i, m) ->
+            Member.Method (i, this.ResolveProxySignature m)
+        | Member.Implementation (i, m) ->
+            Member.Implementation (this.FindProxied i, this.ResolveProxySignature m)
+        | Member.Override (t, m) ->
+            Member.Override (this.FindProxied t, this.ResolveProxySignature m)
+        | Member.Constructor c ->
+            Member.Constructor (this.ResolveProxySignature c)
+        | Member.StaticConstructor ->
+            Member.StaticConstructor
 
     member this.AddQuotedArgMethod(typ, m, a) =
         compilingQuotedArgMethods.Add((typ, m), a)
@@ -474,7 +536,7 @@ type Compilation(meta: Info, ?hasGraph) =
             cls.Methods.ContainsKey meth || compilingMethods.ContainsKey (typ, meth)
         | _ -> false
 
-    member this.LookupMethodInfo(typ, meth) = 
+    member private this.LookupMethodInfoInternal(typ, meth) = 
         let typ = this.FindProxied typ
         match interfaces.TryFind typ with
         | Some intf -> 
@@ -552,6 +614,50 @@ type Compilation(meta: Info, ?hasGraph) =
             match this.GetCustomType typ with
             | NotCustomType -> LookupMemberError (TypeNotFound typ)
             | i -> CustomTypeMember i
+
+    member this.LookupMethodInfo(typ, meth: Method) = 
+        let m = meth.Value
+
+        let otherType() = 
+            match m.Parameters, m.ReturnType with
+            | [ ConcreteType pt ], ConcreteType rt when pt.Generics = [] && rt.Generics = [] ->
+                if pt.Entity = typ then
+                    Some rt.Entity
+                elif rt.Entity = typ then
+                    Some pt.Entity
+                else None
+            | _ -> None
+
+        let res = this.LookupMethodInfoInternal(typ, meth)
+        if m.MethodName = "op_Explicit" then
+            match res with
+            | LookupMemberError _ ->
+                match otherType() with
+                | Some ot ->
+                    match this.LookupMethodInfoInternal(ot, meth) with
+                    | LookupMemberError _ -> 
+                        let implicitMeth = Method { m with MethodName = "op_Implicit" }
+                        match this.LookupMethodInfoInternal(typ, implicitMeth) with
+                        | LookupMemberError _ -> 
+                            match this.LookupMethodInfoInternal(ot, implicitMeth) with
+                            | LookupMemberError _ -> res
+                            | sres -> sres
+                        | sres -> sres
+                    | sres -> sres
+                | _ -> res
+            | res -> res
+        elif m.MethodName = "op_Implicit" then
+            match res with
+            | LookupMemberError _ ->
+                match otherType() with
+                | Some ot ->
+                    match this.LookupMethodInfoInternal(ot, meth) with
+                    | LookupMemberError _ -> res
+                    | sres -> sres
+                | _ -> res
+            | res -> res
+        else
+            res
 
     member this.LookupFieldInfo(typ, field) =
         let typ = this.FindProxied typ
@@ -705,9 +811,38 @@ type Compilation(meta: Info, ?hasGraph) =
         let cls = classes.[typ]
         cls.Implementations.Add((intf, meth), (info, comp))
 
+    member this.CompilingExtraBundles = compilingExtraBundles
+
+    member this.AddCompiledExtraBundle(name, compiledEntryPoint) =
+        let bundle = compilingExtraBundles.[name]
+        compilingExtraBundles.Remove(name) |> ignore
+        compiledExtraBundles.[name] <- { bundle with EntryPoint = compiledEntryPoint }
+
+    member this.AddBundle(baseName, entryPoint, includeJsExports) =
+        let shouldAdd name =
+            not <| compilingExtraBundles.ContainsKey(name)
+        let computedName =
+            Seq.append
+                (Seq.singleton baseName)
+                (Seq.initInfinite <| fun i -> baseName + string i)
+            |> Seq.find shouldAdd
+        let node = ExtraBundleEntryPointNode(this.AssemblyName, computedName)
+        compilingExtraBundles.Add(computedName, {
+            EntryPoint = entryPoint
+            Node = node
+            IncludeJsExports = includeJsExports
+        })
+        { AssemblyName = this.AssemblyName; BundleName = computedName }
+
     member this.Resolve () =
         
         let printerrf x = Printf.kprintf (fun s -> this.AddError (None, SourceError s)) x
+
+        let add k v (d: IDictionary<_,_>) =
+            try 
+                d.Add(k, v)
+            with _ ->
+                printerrf "Unexpected error in name resolver, key already added: %A" k
 
         let rec resolveInterface (typ: TypeDefinition) (nr: NotResolvedInterface) =
             let allMembers = HashSet()
@@ -762,7 +897,7 @@ type Compilation(meta: Info, ?hasGraph) =
                     Extends = nr.Extends
                     Methods = resMethods
                 }
-            interfaces.Add(typ, resNode)
+            interfaces |> add typ resNode
             notResolvedInterfaces.Remove typ |> ignore
         
         while notResolvedInterfaces.Count > 0 do
@@ -783,6 +918,9 @@ type Compilation(meta: Info, ?hasGraph) =
         if hasGraph then
             for req in this.AssemblyRequires do
                 graph.AddEdge(asmNodeIndex, resNode req)
+
+        let objectMethods =
+            HashSet [ "toString"; "Equals"; "GetHashCode" ]
 
         // initialize all class entries
         for KeyValue(typ, cls) in notResolvedClasses do
@@ -813,7 +951,7 @@ type Compilation(meta: Info, ?hasGraph) =
                 match classes.TryFind typ with
                 | Some c -> MergedDictionary c.Methods :> IDictionary<_,_>
                 | _ -> Dictionary() :> _
-            classes.Add (typ,
+            classes |> add typ
                 {
                     Address = if hasWSPrototype || cls.ForceAddress then someEmptyAddress else None
                     BaseClass = if hasWSPrototype then baseCls else None
@@ -826,7 +964,6 @@ type Compilation(meta: Info, ?hasGraph) =
                     HasWSPrototype = hasWSPrototype
                     Macros = cls.Macros |> List.map (fun (m, p) -> m, p |> Option.map ParameterObject.OfObj)
                 }
-            ) 
             // set up dependencies
             if hasGraph then
                 let clsNodeIndex = graph.AddOrLookupNode(TypeNode typ)
@@ -884,6 +1021,8 @@ type Compilation(meta: Info, ?hasGraph) =
                             | _ -> ()
                         addTypeDeps f.FieldType
                     | _ -> ()
+
+        Resolve.addInherits r classes.Current
 
         if hasGraph then
             for KeyValue(ct, cti) in Seq.append customTypes notAnnotatedCustomTypes do
@@ -982,6 +1121,7 @@ type Compilation(meta: Info, ?hasGraph) =
                 match expr with
                 | Function (args, body) ->
                     Function(args, CombineStatements [ ExprStatement (Cctor typ); body ])
+                | Undefined -> Undefined
                 // inlines
                 | _ -> Sequential [ Cctor typ; expr ]
             else expr
@@ -998,7 +1138,46 @@ type Compilation(meta: Info, ?hasGraph) =
             
             let cc = classes.[typ]
 
-            for m in cls.Members do
+            // merging abstract and default entries for methods
+            let members =
+                let abstractAndOverrideMethods, otherMembers =
+                    cls.Members
+                    |> List.partition (function 
+                        | M.Method (_, { Kind = N.Abstract | N.Override _ }) -> true 
+                        | _ -> false
+                    )
+                
+                let mergeVirtual mdef (abs: NotResolvedMethod) (ovr: NotResolvedMethod) =
+                    let m =
+                        { ovr with
+                            Kind = N.Abstract
+                            StrongName = abs.StrongName |> Option.orElse ovr.StrongName
+                        }
+                    M.Method (mdef, m)
+                           
+                let mergedMethods =
+                    abstractAndOverrideMethods
+                    |> List.groupBy (function
+                        | M.Method (mdef, _) -> mdef
+                        | _ -> failwith "impossible, must be a method"
+                    )
+                    |> Seq.map (fun (mdef, ms) ->
+                        match ms with
+                        | [ m ] -> m
+                        | [ M.Method (_, ({ Kind = N.Abstract } as a)); 
+                            M.Method (_, ({ Kind = N.Override _ } as b)) ]
+                             -> mergeVirtual mdef a b
+                        | [ M.Method (_, ({ Kind = N.Override _ } as a)); 
+                            M.Method (_, ({ Kind = N.Abstract } as b)) ]
+                                -> mergeVirtual mdef b a
+                        | _ -> 
+                            printerrf "Unexpected definitions found for a method in type %s: %A - %A" typ.Value.FullName mdef ms
+                            ms.Head
+                    )
+
+                Seq.append mergedMethods otherMembers
+
+            for m in members do
                 
                 match m with
                 | M.Method (mdef, { Sitelet = true }) ->
@@ -1026,8 +1205,8 @@ type Compilation(meta: Info, ?hasGraph) =
                         | N.Constructor -> sn, Some true, false
                         | N.Quotation (pos, argNames) -> 
                             match m with 
-                            | M.Method (mdef, _) ->
-                                try quotations.Add(pos, (typ, mdef, argNames))
+                            | M.Method (mdef, _) ->                     
+                                try quotations |> add pos (typ, mdef, argNames)
                                 with e ->
                                     printerrf "Cannot have two instances of quoted JavaScript code at the same location of files with the same name: %s (%i, %i - %i, %i)"
                                         pos.FileName (fst pos.Start) (snd pos.Start) (fst pos.End) (snd pos.End)
@@ -1058,22 +1237,22 @@ type Compilation(meta: Info, ?hasGraph) =
                             try
                                 let isPure =
                                     nr.Pure || (Option.isNone cc.StaticConstructor && isPureFunction nr.Body)
-                                cc.Constructors.Add (cDef, (comp, opts isPure nr, nr.Body))
+                                cc.Constructors |> add cDef (comp, opts isPure nr, nr.Body)
                             with _ ->
                                 printerrf "Duplicate definition for constructor of %s" typ.Value.FullName
                         else 
-                            compilingConstructors.Add((typ, cDef), (toCompilingMember nr comp, addCctorCall typ cc nr.Body))      
+                            compilingConstructors |> add (typ, cDef) (toCompilingMember nr comp, addCctorCall typ cc nr.Body)
                     | M.Method (mDef, nr) -> 
                         let comp = compiledNoAddressMember nr
                         if nr.Compiled && Option.isNone cc.StaticConstructor then
                             try
                                 let isPure =
                                     nr.Pure || (notVirtual nr.Kind && Option.isNone cc.StaticConstructor && isPureFunction nr.Body)
-                                cc.Methods.Add (mDef, (comp, opts isPure nr, nr.Body))
+                                cc.Methods |> add mDef (comp, opts isPure nr, nr.Body)
                             with _ ->
                                 printerrf "Duplicate definition for method %s.%s" typ.Value.FullName mDef.Value.MethodName
                         else 
-                            compilingMethods.Add((typ, mDef), (toCompilingMember nr comp, addCctorCall typ cc nr.Body)) 
+                            compilingMethods |> add (typ, mDef) (toCompilingMember nr comp, addCctorCall typ cc nr.Body)
                     | _ -> failwith "Fields and static constructors are always named"     
                 | None, Some true ->
                     Dict.addToMulti remainingStaticMembers typ m
@@ -1133,24 +1312,24 @@ type Compilation(meta: Info, ?hasGraph) =
                 if nr.Compiled && Option.isNone res.StaticConstructor then
                     let isPure =
                         nr.Pure || (Option.isNone res.StaticConstructor && isPureFunction nr.Body)
-                    res.Constructors.Add(cDef, (comp, opts isPure nr, nr.Body))
+                    res.Constructors |> add cDef (comp, opts isPure nr, nr.Body)
                 else
-                    compilingConstructors.Add((typ, cDef), (toCompilingMember nr comp, addCctorCall typ res nr.Body))
+                    compilingConstructors |> add (typ, cDef) (toCompilingMember nr comp, addCctorCall typ res nr.Body)
             | M.Field (fName, nr) ->
-                res.Fields.Add(fName, (StaticField addr, nr.IsReadonly, nr.FieldType))
+                res.Fields |> add fName (StaticField addr, nr.IsReadonly, nr.FieldType)
             | M.Method (mDef, nr) ->
                 let comp = compiledStaticMember addr nr
                 if nr.Compiled && Option.isNone res.StaticConstructor then 
                     let isPure =
                         nr.Pure || (notVirtual nr.Kind && Option.isNone res.StaticConstructor && isPureFunction nr.Body)
-                    res.Methods.Add(mDef, (comp, opts isPure nr, nr.Body))
+                    res.Methods |> add mDef (comp, opts isPure nr, nr.Body)
                 else
-                    compilingMethods.Add((typ, mDef), (toCompilingMember nr comp, addCctorCall typ res nr.Body))
+                    compilingMethods |> add (typ, mDef) (toCompilingMember nr comp, addCctorCall typ res nr.Body)
             | M.StaticConstructor expr ->                
                 // TODO: do not rely on address on compiled state
                 let cls = classes.[typ]
                 classes.[typ] <- { cls with StaticConstructor = Some (addr, Undefined) }
-                compilingStaticConstructors.Add(typ, (addr, expr))
+                compilingStaticConstructors |> add typ (addr, expr)
         
         let nameInstanceMember typ name m =
             let res = classes.[typ]
@@ -1163,21 +1342,21 @@ type Compilation(meta: Info, ?hasGraph) =
                         match System.Int32.TryParse name with
                         | true, i -> IndexedField i
                         | _ -> InstanceField name
-                res.Fields.Add(fName, (fi, f.IsReadonly, f.FieldType))
+                res.Fields |> add fName (fi, f.IsReadonly, f.FieldType)
             | M.Method (mDef, nr) ->
                 let comp = compiledInstanceMember name nr
                 match nr.Kind with
                 | N.Implementation intf ->
                     if nr.Compiled && Option.isNone res.StaticConstructor then 
-                        res.Implementations.Add((intf, mDef), (comp, nr.Body))
+                        res.Implementations |> add (intf, mDef) (comp, nr.Body)
                     else
-                        compilingImplementations.Add((typ, intf, mDef), (toCompilingMember nr comp, addCctorCall typ res nr.Body))
+                        compilingImplementations |> add (typ, intf, mDef) (toCompilingMember nr comp, addCctorCall typ res nr.Body)
                 | _ ->
                     if nr.Compiled && Option.isNone res.StaticConstructor then 
                         let isPure = nr.Pure || isPureFunction nr.Body
-                        res.Methods.Add(mDef, (comp, opts isPure nr, nr.Body))
+                        res.Methods |> add mDef (comp, opts isPure nr, nr.Body)
                     else
-                        compilingMethods.Add((typ, mDef), (toCompilingMember nr comp, addCctorCall typ res nr.Body))
+                        compilingMethods |> add (typ, mDef) (toCompilingMember nr comp, addCctorCall typ res nr.Body)
             | _ -> failwith "Invalid instance member kind"   
 
         let getClassAddress typ =
@@ -1188,7 +1367,7 @@ type Compilation(meta: Info, ?hasGraph) =
             | Some a -> a
             | _ ->
                 let a = r.ClassAddress(typ.Value.FullName.Split('.') |> List.ofArray |> List.rev, false).Value    
-                extraClassAddresses.Add(typ, a)
+                extraClassAddresses |> add typ a
                 a
                                      
         for typ, m, sn in fullyNamedStaticMembers do
@@ -1222,9 +1401,9 @@ type Compilation(meta: Info, ?hasGraph) =
                             HasWSPrototype = false
                             Macros = []
                         }
-                    classes.Add(td, cls)
+                    classes |> add td cls
                     cls
-            cls.QuotedArgMethods.Add(m, args)
+            cls.QuotedArgMethods |> add m args
               
         for typ in remainingClasses do
             let addr = defaultAddressOf typ
@@ -1238,14 +1417,12 @@ type Compilation(meta: Info, ?hasGraph) =
                 if not (r.ExactStaticAddress addr) then
                     this.AddError(None, NameConflict ("Static member name conflict", addr |> String.concat "."))
                 nameStaticMember typ (Address addr) m
-           
-        // TODO: check nothing is hiding (exclude overrides and implementations)
+        
         for KeyValue(typ, ms) in namedInstanceMembers do
             let pr = r.LookupPrototype typ
             for m, n in ms do
-                pr.Add n |> ignore
-//                if not (pr.Add n) then
-//                    failwith "instance member name collision"
+                if not (Resolve.addToPrototype pr n || objectMethods.Contains n) then
+                    printerrf "Instance member name conflict on type %s name %s" typ.Value.FullName n
                 nameInstanceMember typ n m      
 
         let simplifyFieldName (f: string) =
@@ -1272,7 +1449,6 @@ type Compilation(meta: Info, ?hasGraph) =
 
         let resolved = HashSet()
         
-        // TODO: add abstract/interface methods even if there are no implementations
         let rec resolveRemainingInstanceMembers typ (cls: ClassInfo) ms =
             if resolved.Add typ then
                 let pr = r.LookupPrototype typ
@@ -1288,8 +1464,6 @@ type Compilation(meta: Info, ?hasGraph) =
                             | _ -> []  
                         resolveRemainingInstanceMembers bTyp bCls bMs
                     | _ -> ()
-                    pr.UnionWith(r.LookupPrototype bTyp) 
-                
                 let ms =
                     let nonOverrides, overrides = 
                         ms |> List.partition (fun m ->
@@ -1297,14 +1471,14 @@ type Compilation(meta: Info, ?hasGraph) =
                             | M.Method (_, { Kind = N.Override _ }) -> false
                             | _ -> true 
                         )
-                    Seq.append nonOverrides overrides
+                    Seq.append overrides nonOverrides
 
                 for m in ms do
                     let name = 
                         match m with
-                        | M.Field (fName, _) -> Resolve.getRenamed (simplifyFieldName fName) pr |> Some
+                        | M.Field (fName, _) -> Resolve.getRenamedForPrototype (simplifyFieldName fName) pr |> Some
                         | M.Method (mDef, { Kind = N.Instance | N.Abstract }) -> 
-                            Resolve.getRenamed mDef.Value.MethodName pr |> Some
+                            Resolve.getRenamedForPrototype mDef.Value.MethodName pr |> Some
                         | M.Method (mDef, { Kind = N.Override td }) ->
                             match classes.TryFind td with
                             | Some tCls -> 
@@ -1521,6 +1695,26 @@ type Compilation(meta: Info, ?hasGraph) =
 
             graph.AddEdge(controlIndex, activate)
 
+        // Add graph edge needed for decimal remoting
+        if hasGraph && this.AssemblyName = "WebSharper.MathJS.Extensions" then
+            let createDecimalBits =
+                MethodNode(
+                    TypeDefinition {
+                        Assembly = "WebSharper.MathJS.Extensions"
+                        FullName = "WebSharper.Decimal"
+                    },
+                    Method {
+                        MethodName = "CreateDecimalBits"
+                        Parameters = [ArrayType(NonGenericType Definitions.Int, 1)]
+                        ReturnType = NonGenericType Definitions.Decimal
+                        Generics = 0
+                    } 
+                )
+            
+            let createDecimalBitsIndex = graph.Lookup.[createDecimalBits]
+
+            graph.AddEdge(TypeNode Definitions.Decimal, createDecimalBitsIndex)
+
     member this.VerifyRPCs () =
         let rec isWebControl (cls: ClassInfo) =
             match cls.BaseClass with
@@ -1550,6 +1744,7 @@ type Compilation(meta: Info, ?hasGraph) =
                 MacroEntries = macroEntries
                 Quotations = quotations
                 ResourceHashes = Dictionary()
+                ExtraBundles = this.AllExtraBundles
             }    
         let jP = Json.Provider.CreateTyped(info)
         let st = Verifier.State(jP)

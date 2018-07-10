@@ -4,18 +4,10 @@ authors IntelliFactory
 licenseUrl http://websharper.com/licensing
 projectUrl http://websharper.com
 description
-    Compiler libraries for C#/F#-to-JavaScript translation
+    Meta-package for the compiler libraries for both C# and F#-to-JavaScript translation.
+    Consider using only WebSharper.Compiler.CSharp or WebSharper.Compiler.FSharp instead if you are only compiling one language.
 tags
     Web JavaScript F# C#
 dependencies
-    WebSharper == CURRENTVERSION
-    Mono.Cecil >= LOCKEDVERSION
-files
-    ../build/Release/FSharp/net461/WebSharper.Compiler.dll ==> lib/net461
-    ../build/Release/FSharp/net461/WebSharper.Compiler.xml ==> lib/net461
-    ../build/Release/FSharp/net461/WebSharper.Compiler.FSharp.dll ==> lib/net461
-    ../build/Release/FSharp/net461/WebSharper.Compiler.FSharp.xml ==> lib/net461
-    ../build/Release/CSharp/net461/WebSharper.Compiler.CSharp.dll ==> lib/net461
-    ../build/Release/CSharp/net461/WebSharper.Compiler.CSharp.xml ==> lib/net461
-    ../build/Release/FSharp/net461/WebSharper.Sitelets.Offline.dll ==> lib/net461
-    ../build/Release/FSharp/net461/WebSharper.Sitelets.Offline.xml ==> lib/net461
+    WebSharper.Compiler.FSharp == CURRENTVERSION
+    WebSharper.Compiler.CSharp == CURRENTVERSION

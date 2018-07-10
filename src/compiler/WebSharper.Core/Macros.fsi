@@ -49,6 +49,16 @@ type Conversion =
     inherit Macro
 
 [<Sealed>]
+type Abs =
+    new : unit -> Abs
+    inherit Macro
+
+[<Sealed>]
+type Sign =
+    new : unit -> Sign
+    inherit Macro
+
+[<Sealed>]
 type String =
     new : unit -> String
     inherit Macro
@@ -149,3 +159,10 @@ type Tuple =
 type TupleExtensions =
     new : unit -> TupleExtensions
     inherit Macro
+
+[<Sealed>]
+type WebWorker =
+    new : unit -> WebWorker
+    inherit Macro
+
+val UncheckedEquals : AST.Expression -> AST.Expression -> AST.Expression

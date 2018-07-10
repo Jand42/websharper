@@ -1,8 +1,8 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0</TargetFrameworks>
     <WebSharperProject>Library</WebSharperProject>
-    <SkipCopyBuildProduct>true</SkipCopyBuildProduct>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../WebSharper.Main/JavaScript.fs">
@@ -10,6 +10,9 @@
     </Compile>
     <Compile Include="../WebSharper.Main/Pervasives.fs">
       <Link>Pervasives.fs</Link>
+    </Compile>
+    <Compile Include="../WebSharper.Main/Promise.fs">
+      <Link>Promise.fs</Link>
     </Compile>
     <Compile Include="../WebSharper.Main/JavaScript.Pervasives.fs">
       <Link>JavaScript.Pervasives.fs</Link>
@@ -235,6 +238,9 @@
     </Compile>
     <Compile Include="../WebSharper.Main.Proxies/Unchecked.fs">
       <Link>Unchecked.fs</Link>
+    </Compile>
+    <Compile Include="../WebSharper.Main.Proxies/ValueOption.fs">
+      <Link>ValueOption.fs</Link>
     </Compile>
     <Compile Include="../WebSharper.Main.Proxies/Primitives.fs">
       <Link>Primitives.fs</Link>

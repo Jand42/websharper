@@ -117,7 +117,7 @@ let TransformMetaSources assemblyName (current: M.Info) sourceMap =
 let CreateBundleJSOutput refMeta current entryPoint =
 
     let pkg = 
-        Packager.packageAssembly refMeta current entryPoint
+        Packager.packageAssembly refMeta current entryPoint Packager.EntryPointStyle.OnLoadIfExists
 
     if pkg = AST.Undefined then None else
 
@@ -138,7 +138,7 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
     TimedStage "Source position transformations"
 
     let pkg = 
-        Packager.packageAssembly refMeta current None
+        Packager.packageAssembly refMeta current (comp |> Option.bind (fun c -> c.EntryPoint)) Packager.EntryPointStyle.OnLoadIfExists
 
     TimedStage "Packaging assembly"
     
@@ -270,9 +270,12 @@ type ResourceContext =
 
         /// Decides how to render a resource.
         RenderResource : ResourceContent -> Resources.Rendering
+
+        /// Base URL path for WebSharper scripts.
+        ScriptBaseUrl : option<string>
     }
 
-let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf, selfJS, deps: Resources.IResource list, lookupAssemblyCode) =
+let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf, selfJS, deps: Resources.IResource list, lookupAssemblyCode, scriptBaseUrl) =
     let pU = WebSharper.PathConventions.PathUtility.VirtualPaths("/")
     let cache = Dictionary()
     let getRendering (content: ResourceContent) =
@@ -296,6 +299,7 @@ let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf,
         {
             DebuggingEnabled = ctx.DebuggingEnabled
             DefaultToHttp = ctx.DefaultToHttp
+            ScriptBaseUrl = ctx.ScriptBaseUrl
             GetAssemblyRendering = fun name ->
                 if name = nameOfSelf then
                     selfJS
@@ -318,4 +322,4 @@ let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf,
         }
     for d in deps do
         d.Render ctx (fun _ -> writer)
-    Utility.WriteStartCode true writer
+    Resources.HtmlTextWriter.WriteStartCode(writer, scriptBaseUrl)

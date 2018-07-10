@@ -53,18 +53,14 @@ let isUnit (t: FSharpType) =
     if t.IsTupleType || t.IsFunctionType then false else
     let td = t.TypeDefinition
     if td.IsArrayType || td.IsByRef then false
-#if NET461 // TODO dotnet: erased type providers
     elif td.IsProvidedAndErased then false
-#endif
     else td.FullName = "Microsoft.FSharp.Core.Unit" || td.FullName = "System.Void"
 
 let isOption (t: FSharpType) =
     let t = getOrigType t
     t.HasTypeDefinition &&
         let td = t.TypeDefinition
-#if NET461 // TODO dotnet: erased type providers
         not td.IsProvidedAndErased &&
-#endif
         td.TryFullName = Some "Microsoft.FSharp.Core.FSharpOption`1"
 
 let rec isSeq (t: FSharpType) = 
@@ -72,9 +68,7 @@ let rec isSeq (t: FSharpType) =
     (
         t.HasTypeDefinition &&
             let td = t.TypeDefinition
-#if NET461 // TODO dotnet: erased type providers
             not td.IsProvidedAndErased &&
-#endif
             td.TryFullName = Some "System.Collections.Generic.IEnumerable`1"
     ) || (
         t.IsGenericParameter && 
@@ -139,10 +133,10 @@ let getDeclaringEntity (x : FSharpMemberOrFunctionOrValue) =
     | Some e -> e
     | None -> failwithf "Enclosing entity not found for %s" x.FullName
                                 
-type FixCtorTransformer(?thisExpr) =
+type FixCtorTransformer(typ, btyp, ?thisExpr) =
     inherit Transformer()
 
-    let mutable firstOcc = true
+    let mutable addedBaseCtor = false
 
     let thisExpr = defaultArg thisExpr This
 
@@ -163,24 +157,42 @@ type FixCtorTransformer(?thisExpr) =
     override this.TransformStatementExpr(a, b) = StatementExpr (a, b)
 
     override this.TransformCtor (t, c, a) =
-        if not firstOcc then Ctor (t, c, a) else
-        firstOcc <- false
-        if t.Entity = Definitions.Obj then thisExpr
-        elif (let fn = t.Entity.Value.FullName in fn = "WebSharper.ExceptionProxy" || fn = "System.Exception") then 
-            match a with
-            | [] -> Undefined
-            | [msg] -> ItemSet(thisExpr, Value (String "message"), msg)
-            | [msg; inner] -> 
+        if addedBaseCtor then Ctor (t, c, a) else
+        addedBaseCtor <- true
+        let isBase = t.Entity <> typ
+        let tn = typ.Value.FullName
+        if (not isBase || Option.isSome btyp) && not (tn = "System.Object" || tn = "System.Exception") then
+            if t.Entity.Value.FullName = "System.Exception" then 
+                let msg, inner =
+                    match a with
+                    | [] -> None, None
+                    | [msg] -> Some msg, None
+                    | [msg; inner] -> Some msg, Some inner 
+                    | _ -> failwith "Too many arguments for Error constructor"
                 Sequential [
-                    ItemSet(thisExpr, Value (String "message"), msg)
-                    ItemSet(thisExpr, Value (String "inner"), inner)
+                    match msg with
+                    | Some m ->
+                        yield ItemSet(thisExpr, Value (String "message"), m)
+                    | None -> ()
+                    match inner with
+                    | Some i ->
+                        yield ItemSet(thisExpr, Value (String "inner"), i)
+                    | None -> ()
+                    yield CompilationHelpers.restorePrototype
                 ]
-            | _ -> failwith "Too many arguments for Error"
-        else
-            BaseCtor(thisExpr, t, c, a) 
+            else
+                BaseCtor(thisExpr, t, c, a) 
+        else thisExpr
 
-let fixCtor expr =
-    FixCtorTransformer().TransformExpression(expr)
+    member this.Fix(expr) = 
+        let res = this.TransformExpression(expr)
+        match btyp with
+        | Some b when not addedBaseCtor -> 
+            Sequential [ BaseCtor(thisExpr, NonGeneric b, ConstructorInfo.Default(), []); res ]
+        | _ -> res
+
+let fixCtor thisTyp baseTyp expr =
+    FixCtorTransformer(thisTyp, baseTyp).Fix(expr)
 
 module Definitions =
     let List =
@@ -310,9 +322,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
         else
         let td = getOrigDef td
         let fullName =
-#if NET461 // TODO dotnet: erased type providers
             if td.IsProvidedAndErased then td.LogicalName else
-#endif
             td.QualifiedName.Split([|','|]).[0] 
         let res =
             {
@@ -382,9 +392,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
             ByRefType(this.ReadTypeSt markStaticTP tparams t.GenericArguments.[0])
         else
             let fn = 
-#if NET461 // TODO dotnet: erased type providers
                 if td.IsProvidedAndErased then td.LogicalName else
-#endif
                 td.FullName
             if fn.StartsWith "System.Tuple" then
                 getTupleType false
@@ -483,6 +491,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
                         Generics   = tparams.Count - (getDeclaringEntity x).GenericParameters.Count
                     } 
                 )
+        |> comp.ResolveProxySignature
 
     member this.ReadAndRegisterTypeDefinition (comp: Compilation) (td: FSharpEntity) =
         let res = this.ReadTypeDefinition td
@@ -1057,9 +1066,11 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
                         yield Var o
                     ]
                 )
-            Let(r, CopyCtor(sr.ReadAndRegisterTypeDefinition env.Compilation typ.TypeDefinition, plainObj),
+            let td = sr.ReadAndRegisterTypeDefinition env.Compilation typ.TypeDefinition
+            let baseTyp = typ.TypeDefinition.BaseType |> Option.map (fun t -> sr.ReadAndRegisterTypeDefinition env.Compilation t.TypeDefinition) 
+            Let(r, CopyCtor(td, plainObj),
                 Sequential [
-                    yield FixCtorTransformer(Var r).TransformExpression(tr expr)
+                    yield FixCtorTransformer(td, baseTyp, Var r).TransformExpression(tr expr)
                     yield Var r
                 ]
             )

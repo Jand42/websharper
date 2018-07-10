@@ -22,17 +22,24 @@ namespace WebSharper
 
 open WebSharper.JavaScript
 
+[<JavaScript>]
+module Exception =
+    let withInner (msg, inner) =
+        let e = Error(msg)
+        e?inner <- inner
+        e
+
 [<Name [| "Error" |]>]
 [<Proxy(typeof<System.Exception>)>]
 type private ExceptionProxy =
-    [<Inline "Error($message)">]
+    [<Inline "new Error()">]
+    new () = { }
+
+    [<Inline "new Error($message)">]
     new (message: string) = { }
 
-    [<Inline "var e = Error($message); e.inner = $inner; return e">]
-    new (message: string, inner: exn) = { }
-
     [<Inline>]
-    new () = ExceptionProxy "Exception of type 'System.Exception' was thrown."
+    static member CtorProxy (message: string, inner: exn) = Exception.withInner (message, inner)
 
     member this.Message with [<Inline "$this.message">] get () = X<string>
     member this.InnerException with [<Inline "$this.inner">] get () = X<System.Exception>
@@ -154,3 +161,10 @@ type private OverflowException(message: string) =
     inherit exn(message)
 
     new () = OverflowException "Arithmetic operation resulted in an overflow."
+
+[<Proxy(typeof<System.Threading.Tasks.TaskCanceledException>)>]
+[<Name "TaskCanceledException">]
+type private TaskCanceledException(message: string) =
+    inherit exn(message)
+
+    new () = TaskCanceledException "A task was canceled."

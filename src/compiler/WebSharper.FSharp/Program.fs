@@ -29,7 +29,7 @@ open WebSharper.Compiler
 open WebSharper.Compiler.CommandTools
 open WebSharper.Compiler.FrontEnd
 module C = WebSharper.Compiler.Commands
-open ErrorPrinting
+open WebSharper.Compiler.FSharp.ErrorPrinting
 
 /// In BundleOnly mode, output a dummy DLL to please MSBuild
 let MakeDummyDll (path: string) (assemblyName: string) =
@@ -52,14 +52,24 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
     let mainProxiesFile() =
         "../../../build/" + (if config.IsDebug then "Debug" else "Release") + "/Proxies.args"    
 
-    if thisName = "WebSharper.Main.Proxies" then 
-        File.WriteAllLines(mainProxiesFile(), config.CompilerArgs)
+    if thisName = "WebSharper.Main.Proxies" then
+        let config =
+            { config with
+                References =
+                    config.References
+                    |> Array.filter (fun r -> not (r.EndsWith "WebSharper.Main.Proxies.dll"))
+            }
+        let mainProxiesFile = mainProxiesFile()
+        Directory.CreateDirectory(Path.GetDirectoryName(mainProxiesFile)) |> ignore
+        File.WriteAllLines(mainProxiesFile, config.CompilerArgs)
+        MakeDummyDll config.AssemblyFile thisName
         printfn "Written Proxies.args"
         0 
     else
 
     let checker = FSharpChecker.Create(keepAssemblyContents = true)
     let compiler = WebSharper.Compiler.FSharp.WebSharperFSharpCompiler(printfn "%s", checker)
+    compiler.WarnSettings <- warnSettings
 
     let isBundleOnly = config.ProjectType = Some BundleOnly
     
@@ -93,8 +103,8 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
         ]        
     let aR =
         AssemblyResolver.Create()
-            .SearchDirectories([compilerDir])
             .SearchPaths(paths)
+            .SearchDirectories([compilerDir])
 
     if config.ProjectType = Some WIG then  
         aR.Wrap <| fun () ->
@@ -179,7 +189,7 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
         compiler.Compile(refMeta, compilerArgs, config, thisName)
 
     match comp with
-    | None ->
+    | None ->        
         1
     | Some comp ->
 
@@ -193,16 +203,24 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
         | Some (_, _, m) -> m 
         | _ -> WebSharper.Core.Metadata.Info.Empty
 
-    let js, currentMeta, sources =
+    let getRefMetas() =
+        match wsRefsMeta.Result with 
+        | Some (_, m, _) -> m 
+        | _ -> []
+
+    let js, currentMeta, sources, extraBundles =
+        let currentMeta = comp.ToCurrentMetadata(config.WarnOnly)
         if isBundleOnly then
-            let currentMeta, sources = TransformMetaSources comp.AssemblyName (comp.ToCurrentMetadata(config.WarnOnly)) config.SourceMap 
-            None, currentMeta, sources
+            let currentMeta, sources = TransformMetaSources comp.AssemblyName currentMeta config.SourceMap 
+            let extraBundles = Bundling.AddExtraBundles config (getRefMetas()) currentMeta refs comp (Choice1Of2 comp.AssemblyName)
+            None, currentMeta, sources, extraBundles
         else
             let assem = loader.LoadFile config.AssemblyFile
+
+            let extraBundles = Bundling.AddExtraBundles config (getRefMetas()) currentMeta refs comp (Choice2Of2 assem)
     
             let js, currentMeta, sources =
-                ModifyAssembly (Some comp) (getRefMeta()) 
-                    (comp.ToCurrentMetadata(config.WarnOnly)) config.SourceMap config.AnalyzeClosures assem
+                ModifyAssembly (Some comp) (getRefMeta()) currentMeta config.SourceMap config.AnalyzeClosures assem
 
             match config.ProjectType with
             | Some (Bundle | Website) ->
@@ -224,7 +242,7 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
             assem.Write (config.KeyFile |> Option.map readStrongNameKeyPair) config.AssemblyFile
 
             TimedStage "Writing resources into assembly"
-            js, currentMeta, sources
+            js, currentMeta, sources, extraBundles
 
     match config.JSOutputPath, js with
     | Some path, Some (js, _) ->
@@ -245,9 +263,10 @@ let Compile (config : WsConfig) (warnSettings: WarnSettings) =
             match wsRefsMeta.Result with
             | Some (_, metas, _) -> metas
             | _ -> []
+
         let currentJS =
             lazy CreateBundleJSOutput (getRefMeta()) currentMeta comp.EntryPoint
-        Bundling.Bundle config metas currentMeta currentJS sources refs comp.EntryPoint
+        Bundling.Bundle config metas currentMeta comp currentJS sources refs extraBundles
         TimedStage "Bundling"
         0
     | Some Html ->
@@ -381,6 +400,8 @@ let compileMain argv =
     let wsconfig = Path.Combine(Path.GetDirectoryName (!wsArgs).ProjectFile, "wsconfig.json")
     if File.Exists wsconfig then
         wsArgs := (!wsArgs).AddJson(File.ReadAllText wsconfig)
+
+    wsArgs := SetScriptBaseUrl !wsArgs
 
     let clearOutput() =
         try

@@ -75,7 +75,7 @@ type WarnAttribute(warning: string) =
     inherit A()
 
 /// Marks methods, properties and constructors for compilation to JavaScript.
-[<Sealed; U(T.Assembly|||T.Class|||T.Interface|||T.Module|||T.Constructor|||T.Method|||T.Property|||T.Event|||T.Struct|||T.Parameter)>]
+[<Sealed; U(T.Assembly|||T.Class|||T.Interface|||T.Module|||T.Constructor|||T.Method|||T.Property|||T.Event|||T.Struct|||T.Parameter, AllowMultiple = true)>]
 type JavaScriptAttribute() =
     inherit A()
 
@@ -83,7 +83,12 @@ type JavaScriptAttribute() =
     new (enabled: bool) = JavaScriptAttribute()
     
     /// Specify a type full name or file name (without path) to include in JavaScript compilation.
+    /// Use on assembly level.
     new (typeOrFile : string) = JavaScriptAttribute()
+
+    /// Specify a type to include in JavaScript compilation.
+    /// Use on assembly level.
+    new (clientType : Type) = JavaScriptAttribute()
 
 /// Annotates methods an constructors with custom compilation rules.
 /// The supplied type should implement Macros.IMacro and a default constructor.
@@ -210,6 +215,20 @@ type DateTimeFormatAttribute =
 type SPAEntryPointAttribute() = 
     inherit A()
 
+/// Marks methods, properties and constructors for always including it in JavaScript output.
+/// Includes the effect of JavaSctipt attribute.
+[<Sealed; U(T.Assembly|||T.Class|||T.Interface|||T.Module|||T.Constructor|||T.Method|||T.Property|||T.Event|||T.Struct|||T.Parameter, AllowMultiple = true)>]
+type JavaScriptExportAttribute() = 
+    inherit A()
+    
+    /// Specify a type full name or file name (without path) to export in JavaScript.
+    /// Use on assembly level.
+    new (typeOrFile : string) = JavaScriptExportAttribute()
+
+    /// Specify a type to export in JavaScript.
+    /// Use on assembly level.
+    new (exportType : Type) = JavaScriptExportAttribute()
+
 /// Marks a type to be translated to have a prototype if it would not have one otherwise.
 /// This is needed if you want to do type checks in client code against it.
 [<Sealed; U(T.Class|||T.Struct)>]
@@ -251,7 +270,7 @@ type EndPointAttribute =
 /// Indicates that a union case in an action type must only be mapped
 /// for requests that use the given HTTP method(s).
 /// Example: type Action = | [<Method "POST">] MyPostAction
-[<Sealed; U(T.Property, AllowMultiple = true)>]
+[<Sealed; U(T.Class ||| T.Property, AllowMultiple = true)>]
 type MethodAttribute([<ParamArray>] methodName: string[]) =
     inherit A()
 

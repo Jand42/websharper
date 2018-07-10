@@ -550,7 +550,7 @@ module File =
         Class "Blob"
         |+> Static [
                 Constructor T<unit>
-                Constructor ((Type.ArrayOf TypedArrays.ArrayBuffer + Type.ArrayOf TypedArrays.ArrayBufferView + TSelf + T<string>) * !?BlobPropertyBag)
+                Constructor ((Type.ArrayOf TypedArrays.ArrayBuffer + Type.ArrayOf TypedArrays.ArrayBufferView + Type.ArrayOf TSelf + Type.ArrayOf T<string>) * !?BlobPropertyBag)
             ]
         |+> Instance [
                 "size" =? T<int>
@@ -1257,66 +1257,6 @@ module AppCache =
             ///  Function onobsolete;
         ]
 
-module WebWorkers =
-
-    let WorkerNavigator = Class "WorkerNavigator"
-    let MessagePortArray = Class "MessagePortArray"
-
-    let WorkerUtils =
-        Class "WorkerUtils"
-        |+> Static [
-            "importScripts" => (!+ T<string>) ^-> T<unit>
-            "navigator" =? WorkerNavigator
-        ]
-
-    let WorkerLocation =
-        Class "WorkerLocation"
-
-    let WorkerGlobalScope = 
-        let WorkerGlobalScope = Class "WorkerGlobalScope"
-        WorkerGlobalScope
-        // |=> Implements [T<EventTarget>; WorkerUtils]
-        |+> Instance [
-            "self" =? WorkerGlobalScope
-            "location" =? WorkerLocation
-            "close" => T<unit> ^-> T<unit>
-            // attribute Function onerror;
-        ]
-    
-    let SharedWorkerScope =   
-        Class "SharedWorkerGlobalScope"
-            |=> Inherits WorkerGlobalScope
-            |+> Instance [
-                "name" =? T<string>
-                "applicationCache" =? AppCache.ApplicationCache
-                //           attribute Function onconnect;
-            ]
-
-    let DedicatedWorkerGlobalScope =
-        Class "DedicatedWorkerGlobalScope"
-        |=> Inherits WorkerGlobalScope
-        |+> Instance [
-            "postMessage" => (T<obj> * !? MessagePortArray) ^-> T<unit>
-            /// attribute Function onmessage;
-            
-        ]
-        
-    let AbstractWorker =
-        Class "AbstractWorker"
-        // |=> Implements [T<EventTarget>]
-        |+> Instance [
-            // attribute Function onerror;
-            ]
-
-    let Worker =           
-        Class "Worker"
-        |=> Inherits AbstractWorker
-        |+> Instance [
-            "terminate" => T<unit> ^-> T<unit>
-            "postMessage" => (T<obj> * !? MessagePortArray) ^-> T<unit>
-            // attribute Function onmessage;
-        ]
-
 module General = 
     let BarProp =
         let BarProp = Class "BarProp"
@@ -1383,14 +1323,23 @@ module General =
             "clearRedo" => T<unit> ^-> T<unit> 
         ]
 
-    let WindowProxyType = Class "Window"
-    let MessagePortType = Class "MessagePort"
+    let Window = Class "Window"
+    let MessagePort = Class "MessagePort"
 
-
+    let ErrorEvent =
+        Class "ErrorEvent"
+        |=> Inherits Dom.Interfaces.Event
+        |+> Instance [
+            "message" =? T<string>
+            "filename" =? T<string>
+            "lineno" =? T<int>
+            "colno" =? T<int>
+            "error" =? T<obj>
+        ]
 
     let MessageEvent =
         Class "MessageEvent"
-        // |=> Implements [T<Event>]
+        |=> Inherits Dom.Interfaces.Event
         |+> Static [
             Constructor (T<string> * !?T<obj>)
         ]
@@ -1398,20 +1347,21 @@ module General =
             "data" =? T<obj>
             "origin" =? T<string>
             "lastEventId" =? T<string>
-            "source" =? WindowProxyType
-            "ports" =? Type.ArrayOf(MessagePortType)
-            "initMessageEvent" => T<string> * T<bool> * T<bool> * T<obj> * T<string> * T<string> * WindowProxyType * Type.ArrayOf(MessagePortType) ^-> T<unit>
+            "source" =? Window
+            "ports" =? Type.ArrayOf(MessagePort)
+            "initMessageEvent" => T<string> * T<bool> * T<bool> * T<obj> * T<string> * T<string> * Window * Type.ArrayOf(MessagePort) ^-> T<unit>
                 |> Obsolete
         ]
 
-    let MessagePort =
-        MessagePortType
+    do
+        MessagePort
         |+> Instance [
-            "postMessage" => T<obj> * Type.ArrayOf(MessagePortType) ^-> T<unit>
+            "postMessage" => T<obj> * Type.ArrayOf(MessagePort) ^-> T<unit>
             "start" => T<unit> ^-> T<unit>
             "close" => T<unit> ^-> T<unit>
             "onmessage" =@ MessageEvent ^-> T<unit>
         ]
+        |> ignore
 
     let Navigator =
         Class "Navigator" 
@@ -1438,12 +1388,72 @@ module General =
             "setProperty" => T<string>?propertyName * !? T<string>?value * !? T<string>?priority ^-> T<unit>
         ]
 
-    let Window = 
-        let f = Dom.Interfaces.Event ^-> T<unit>
-        WindowProxyType
-        |=> Inherits Dom.Interfaces.EventTarget
+    let URLSearchParams =
+        Class "URLSearchParams"
         |+> Static [
-            "self" =? WindowProxyType
+            Constructor T<string>
+            Constructor T<(string * string)[]>
+            Constructor T<string[]>
+            Constructor Ecma.Definition.EcmaObjectG.[T<string>]
+        ]
+        |+> Instance [
+            "append" => T<string>?key * T<string>?value ^-> T<unit>
+            "delete" => T<string>?key ^-> T<unit>
+            "get" => T<string>?key ^-> T<string>
+            "getAll" => T<string>?key ^-> T<string[]>
+            "has" => T<string>?key ^-> T<bool>
+            "set" => T<string>?key * T<string>?value ^-> T<unit>
+            "sort" => T<unit> ^-> T<unit>
+        ]
+
+    let URL =
+        Class "URL"
+        |+> Static [
+            Constructor (T<string>?url * !?T<string>?``base``)
+        ]
+        |+> Instance [
+            "hash" =@ T<string>
+            "host" =@ T<string>
+            "hostname" =@ T<string>
+            "href" =@ T<string>
+            "origin" =? T<string>
+            "password" =@ T<string>
+            "pathname" =@ T<string>
+            "port" =@ T<string>
+            "protocol" =@ T<string>
+            "search" =@ T<string>
+            "searchParams" =? URLSearchParams
+            "username" =@ T<string>
+        ]
+        |+> Static [
+            "createObjectURL" => (File.Blob + File.File) ^-> T<string>
+            "revokeObjectURL" => T<string> ^-> T<unit>
+        ]
+
+    let WindowOrWorkerGlobalScope =
+        Class "WindowOrWorkerGlobalScope"
+        |=> Inherits Dom.Interfaces.EventTarget
+        |+> Instance [
+            // "caches" =? CacheStorage
+            // "indexedDB" =? IDBFactory
+            "isSecureContext" =? T<bool>
+            "origin" =? T<string>
+
+            "atob" => T<string> ^-> T<string>
+            "btoa" => T<string> ^-> T<string>
+
+            "setInterval" => (T<unit> ^-> T<unit>)?callback * T<int>?delay ^-> T<obj>
+            "setTimeout" => (T<unit> ^-> T<unit>)?callback * !?T<int>?delay ^-> T<obj>
+            "clearInterval" => T<obj>?intervalId ^-> T<unit>
+            "clearTimeout" => T<obj>?timeoutId ^-> T<unit>
+        ]
+
+    do
+        let f = Dom.Interfaces.Event ^-> T<unit>
+        Window
+        |=> Inherits WindowOrWorkerGlobalScope
+        |+> Static [
+            "self" =? Window
             |> WithGetterInline "window"
             |> ObsoleteWithMessage "Use JS.Window instead."
         ]
@@ -1494,17 +1504,17 @@ module General =
             "focus" => T<unit> ^-> T<unit>
                 |> WithComment "Makes a request to bring the window to the front"
 
-            "frames" =? WindowProxyType
+            "frames" =? Window
             "length" =? T<int>
-            "top" =? WindowProxyType
-            "opener" =? WindowProxyType
-            "parent" =? WindowProxyType
+            "top" =? Window
+            "opener" =? Window
+            "parent" =? Window
             "frameElement" =? Dom.Interfaces.Element
-            "open" => (T<string> * T<string> * T<string> * T<string>) ^->  WindowProxyType
-            "open" => (T<string> * T<string> * T<string>) ^->  WindowProxyType
-            "open" => (T<string> * T<string>) ^->  WindowProxyType
-            "open" => (T<string>) ^->  WindowProxyType
-            "open" => (T<unit>) ^->  WindowProxyType
+            "open" => (T<string> * T<string> * T<string> * T<string>) ^->  Window
+            "open" => (T<string> * T<string> * T<string>) ^->  Window
+            "open" => (T<string> * T<string>) ^->  Window
+            "open" => (T<string>) ^->  Window
+            "open" => (T<unit>) ^->  Window
             "close" => T<unit> ^-> T<unit>
 
             "navigator" =? Navigator
@@ -1605,6 +1615,145 @@ module General =
             "onunload" =@ f
             "onvolumechange" =@ f
             "onwaiting" =@ f
+
+            "NaN" =? T<double> |> WithGetterInline "NaN"
+            "Infinity" =? T<double> |> WithGetterInline "Infinity"
+            "undefined" =? T<obj> |> WithGetterInline "undefined"
+            "eval" => T<string>?expr ^-> T<obj> |> WithInline "eval($expr)"
+            "parseInt" => T<string>?str * !?T<int>?radix ^-> T<int> |> WithInline "parseInt($str, $radix)"
+            "parseFloat" => T<string>?str ^-> T<double> |> WithInline "parseFloat($str)"
+            "isNaN" => T<obj>?number ^-> T<bool> |> WithInline "isNaN($number)"
+            "isFinite" => (T<int> + T<float>)?number ^-> T<bool> |> WithInline "isFinite($number)"
+            "decodeURI" => T<string>?str ^-> T<string> |> WithInline "decodeURI($str)"
+            "decodeURIComponent" => T<string>?str ^-> T<string> |> WithInline "decodeURIComponent($str)"
+            "encodeURI" => T<string>?str ^-> T<string> |> WithInline "encodeURI($str)"
+            "encodeURIComponent" => T<string>?str ^-> T<string> |> WithInline "encodeURIComponent($str)"
+        ]
+        |> ignore
+
+module WebWorkers =
+
+    let WorkerType =
+        Pattern.EnumStrings "WorkerType" ["classic"; "module"]
+
+    let WorkerOptions =
+        Pattern.Config "WorkerOptions" {
+            Required = []
+            Optional =
+                [
+                    "type", WorkerType.Type
+                    "credentials", T<string>
+                    "name", T<string>
+                ]
+        }
+
+    let WorkerNavigator =
+        Class "WorkerNavigator"
+        |+> Instance [
+            "hardwareConcurrency" =? T<int>
+            "language" =? T<string>
+            "languages" =? Type.ArrayOf T<string>
+            "onLine" =? T<bool>
+            "userAgent" =? T<string>
+        ]
+
+    let WorkerUtils =
+        Class "WorkerUtils"
+        |+> Static [
+            "importScripts" => (!+ T<string>) ^-> T<unit>
+            "navigator" =? WorkerNavigator
+        ]
+
+    let WorkerLocation =
+        Class "WorkerLocation"
+        |+> Instance [
+            "href" =? T<string>
+            "protocol" =? T<string>
+            "host" =? T<string>
+            "hostname" =? T<string>
+            "origin" =? T<string>
+            "port" =? T<string>
+            "pathname" =? T<string>
+            "search" =? T<string>
+            "hash" =? T<string>
+        ]
+
+    let WorkerGlobalScope = 
+        Class "WorkerGlobalScope"
+        |=> Inherits General.WindowOrWorkerGlobalScope
+        |+> Instance [
+            "navigator" =? WorkerNavigator
+            "self" =? TSelf
+            "location" =? WorkerLocation
+            "onerror" =? General.ErrorEvent ^-> T<unit>
+            "onoffline" =? Dom.Interfaces.Event ^-> T<unit>
+            "ononline" =? Dom.Interfaces.Event ^-> T<unit>
+            "onlanguagechange" =? Dom.Interfaces.Event ^-> T<unit>
+            "importScripts" => !+T<string> ^-> T<unit>
+        ]
+
+    let DedicatedWorkerGlobalScope =
+        Class "DedicatedWorkerGlobalScope"
+        |=> Inherits WorkerGlobalScope
+        |+> Instance [
+            "onmessage" =@ General.MessageEvent ^-> T<unit>
+            "onmessageerror" =@ General.MessageEvent ^-> T<unit>
+            "close" => T<unit> ^-> T<unit>
+            "postMessage" => !?T<obj>?message * !?T<obj[]>?transferList ^-> T<unit>
+        ]
+
+    let SharedWorkerGlobalScope =
+        Class "SharedWorkerGlobalScope"
+        |=> Inherits WorkerGlobalScope
+        |+> Instance [
+            "name" =? T<string>
+            "applicationCache" =? AppCache.ApplicationCache
+            "onconnect" =@ Dom.Interfaces.Event ^-> T<unit>
+            "close" => T<unit> ^-> T<unit>
+        ]
+
+    let AbstractWorker =
+        Interface "AbstractWorker"
+        |+> [
+            "onerror" =@ General.ErrorEvent ^-> T<unit>
+        ]
+
+    let Worker =
+        Class "Worker"
+        |=> Inherits Dom.Interfaces.EventTarget
+        |=> Implements [AbstractWorker]
+        |+> Static [
+            Constructor (T<string>?url * !?WorkerOptions)
+            Constructor (DedicatedWorkerGlobalScope ^-> T<unit>)
+            |> WithMacro typeof<WebSharper.Core.Macros.WebWorker>
+            |> WithComment "Create a Web Worker with the given expression as entry point. \
+                A bundled JavaScript file named <assemblyname>.worker.js is automatically compiled for it."
+            Constructor (T<string>?name * (DedicatedWorkerGlobalScope ^-> T<unit>))
+            |> WithMacro typeof<WebSharper.Core.Macros.WebWorker>
+            |> WithComment "Create a Web Worker with the given expression as entry point. \
+                A bundled JavaScript file named <assemblyname>.<name>.js is automatically compiled for it."
+            Constructor (T<string>?name * T<bool>?includeJsExports * (DedicatedWorkerGlobalScope ^-> T<unit>))
+            |> WithMacro typeof<WebSharper.Core.Macros.WebWorker>
+            |> WithComment "Create a Web Worker with the given expression as entry point. \
+                A bundled JavaScript file named <assemblyname>.<name>.js is automatically compiled for it.
+                If includeJsExports is true, values marked [JavaScriptExport] are included in the bundle."
+        ]
+        |+> Instance [
+            "onmessage" =@ General.MessageEvent ^-> T<unit>
+            "onmessageerror" =@ General.MessageEvent ^-> T<unit>
+            "postMessage" => !?T<obj>?message * !?T<obj[]>?transferList ^-> T<unit>
+            "terminate" => T<unit> ^-> T<unit>
+        ]
+
+    let SharedWorker =
+        Class "SharedWorker"
+        |=> Inherits Dom.Interfaces.EventTarget
+        |=> Implements [AbstractWorker]
+        |+> Static [
+            Constructor (T<string>?url * !?WorkerOptions)
+        ]
+        |+> Instance [
+            "port" =? General.MessagePort
         ]
 
 module WebGL =
@@ -2280,14 +2429,18 @@ module Definition =
                 General.BarProp
                 General.History
                 General.Location
+                General.ErrorEvent
                 General.MessageEvent
                 General.MessagePort
                 General.Navigator
                 General.ScrollRestoration
                 General.UndoManager
+                General.WindowOrWorkerGlobalScope
                 General.Window
                 General.CSSSD
                 General.MQL
+                General.URL
+                General.URLSearchParams
                 TypedArrays.DataView.Class
                 TypedArrays.ArrayBuffer
                 TypedArrays.ArrayBufferView
@@ -2304,6 +2457,17 @@ module Definition =
                 WebSockets.ReadyState
                 WebStorage.Storage
                 WebStorage.StorageEvent
+                WebWorkers.WorkerType
+                WebWorkers.WorkerOptions
+                WebWorkers.WorkerNavigator
+                WebWorkers.WorkerUtils
+                WebWorkers.WorkerLocation
+                WebWorkers.WorkerGlobalScope
+                WebWorkers.DedicatedWorkerGlobalScope
+                WebWorkers.SharedWorkerGlobalScope
+                WebWorkers.AbstractWorker
+                WebWorkers.Worker
+                WebWorkers.SharedWorker
             ]
             Namespace "WebSharper.JavaScript.Geolocation" [
                 Geolocation.Coordinates

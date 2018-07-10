@@ -502,4 +502,17 @@ let Tests =
             equal mA 1
             equal mB 2            
         }
+
+        Test "ValueOption" {
+            raises ValueNone.Value
+            equalMsg (ValueSome(1).Value) 1 "ValueOption.Value"
+        }
+
+        Test "Reserved global identifiers" {
+            isTrue (
+                let self = 10
+                let window = 20
+                self = 10 && window = 20 && self + window = 30 && JS.Global :? WebSharper.JavaScript.Window
+            )
+        }
     }

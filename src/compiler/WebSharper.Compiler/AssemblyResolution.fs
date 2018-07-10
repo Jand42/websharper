@@ -33,12 +33,8 @@ module Implemetnation =
             |> isCompatible name)
 
     let loadInto (baseDir: string) (dom: AppDomain) (path: string) =
-        let f = FileInfo path
-        if f.DirectoryName = baseDir then
-            dom.Load(AssemblyName.GetAssemblyName path)
-        else
-            File.ReadAllBytes path
-            |> dom.Load
+        File.ReadAllBytes path
+        |> dom.Load
 
     type AssemblyResolution =
         {
@@ -82,7 +78,7 @@ module Implemetnation =
                 seq {
                     for path in paths do
                         for ext in [".dll"; ".exe"] do
-                            if Path.GetFileName(path).ToLower() = (name.Name + ext).ToLower() then
+                            if String.Equals(Path.GetFileName(path), name.Name + ext, StringComparison.OrdinalIgnoreCase) then
                                 if isMatchingFile name path then
                                     yield path
                 }

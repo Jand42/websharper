@@ -28,7 +28,12 @@ open WebSharper.Core
 open WebSharper.Core.AST
 module M = WebSharper.Core.Metadata
 
-let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint =
+type EntryPointStyle =
+    | OnLoadIfExists
+    | ForceOnLoad
+    | ForceImmediate
+
+let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint entryPointStyle =
     let addresses = Dictionary()
     let declarations = ResizeArray()
     let statements = ResizeArray()
@@ -37,7 +42,7 @@ let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint =
     let glob = Var g
     declarations.Add <| VarDeclaration (g, Var (Id.Global()))
     addresses.Add(Address [], glob)
-    addresses.Add(Address [ "window" ], glob)
+    addresses.Add(Address [ "self" ], glob)
     let safeObject expr = Binary(expr, BinaryOperator.``||``, Object []) 
     
     let rec getAddress (address: Address) =
@@ -204,10 +209,14 @@ let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint =
         classes.Remove t |> ignore
         packageClass c t.Value.FullName
 
-    match entryPoint with
-    | Some ep ->
+    match entryPointStyle, entryPoint with
+    | (OnLoadIfExists | ForceOnLoad), Some ep ->
         statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))
-    | _ -> ()
+    | ForceImmediate, Some ep ->
+        statements.Add ep
+    | (ForceOnLoad | ForceImmediate), None ->
+        failwith "Missing entry point or export. Add SPAEntryPoint attribute to a static method without arguments, or JavaScriptExport on types/methods to expose them."
+    | OnLoadIfExists, None -> ()
     
     let trStatements = statements |> Seq.map globalAccessTransformer.TransformStatement |> List.ofSeq
 

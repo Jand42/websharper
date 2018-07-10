@@ -102,16 +102,25 @@ module UnpackCommand =
             member this.WebResources =
                 asm.GetWebResources()
             member this.DownloadableResources =
-                let rec printError (e: exn) =
-                    if isNull e.InnerException then
-                        e.Message
-                    else e.Message + " - " + printError e.InnerException 
+                let printError (e: exn) =
+                    let rec messages (e: exn) =
+                        seq {
+                            yield e.Message
+                            match e with
+                            | :? System.Reflection.ReflectionTypeLoadException as e ->
+                                yield! Seq.collect messages e.LoaderExceptions
+                            | e when isNull e.InnerException -> ()
+                            | e -> yield! messages e.InnerException
+                        }
+                    String.concat " - " (messages e)
                 let a = 
                     let path = asm.LoadPath.Value
                     try
                         System.Reflection.Assembly.Load (Path.GetFileNameWithoutExtension path)
                     with e ->
-                        eprintfn "Failed to load assembly for unpacking local resources: %s - %s" path (printError e)     
+                        if e.HResult <> 0x80131058 then
+                            errors.Add <| sprintf "Failed to load assembly for unpacking local resources: %s - %s" p (printError e)     
+                        // else this is a reference assembly, so it's ok not to load it.
                         null
                 if not (isNull a) then
                     a.GetTypes() |> Seq.choose (fun t ->

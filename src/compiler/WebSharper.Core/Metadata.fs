@@ -23,7 +23,7 @@
 module WebSharper.Core.Metadata
 
 open System.Collections.Generic
-
+open System.Runtime.InteropServices
 open WebSharper.Core.AST
 
 type RemotingKind =
@@ -248,6 +248,7 @@ type Node =
     | ResourceNode of TypeDefinition * option<ParameterObject>
     | AssemblyNode of string * bool
     | EntryPointNode 
+    | ExtraBundleEntryPointNode of string * string
 
 type GraphData =
     {
@@ -271,6 +272,18 @@ type MetadataEntry =
     | ConstructorEntry of Constructor
     | CompositeEntry of list<MetadataEntry>
 
+type ExtraBundle =
+    {
+        AssemblyName : string
+        BundleName : string
+    }
+
+    member this.FileName =
+        this.AssemblyName + "." + this.BundleName + ".js"
+
+    member this.MinifiedFileName =
+        this.AssemblyName + "." + this.BundleName + ".min.js"
+
 type Info =
     {
         SiteletDefinitions: (TypeDefinition * option<Method>)[]
@@ -281,6 +294,7 @@ type Info =
         MacroEntries : IDictionary<MetadataEntry, list<MetadataEntry>>
         Quotations : IDictionary<SourcePos, TypeDefinition * Method * list<string>>
         ResourceHashes : IDictionary<string, int>
+        ExtraBundles : Set<ExtraBundle>
     }
 
     static member Empty =
@@ -293,6 +307,7 @@ type Info =
             MacroEntries = Map.empty
             Quotations = Map.empty
             ResourceHashes = Map.empty
+            ExtraBundles = Set.empty
         }
 
     static member UnionWithoutDependencies (metas: seq<Info>) = 
@@ -349,8 +364,15 @@ type Info =
             Classes = unionMerge (metas |> Seq.map (fun m -> m.Classes))
             CustomTypes = Dict.unionDupl (metas |> Seq.map (fun m -> m.CustomTypes))
             MacroEntries = Dict.unionAppend (metas |> Seq.map (fun m -> m.MacroEntries))
-            Quotations = Dict.union (metas |> Seq.map (fun m -> m.Quotations))
+            Quotations = 
+                try
+                    Dict.union (metas |> Seq.map (fun m -> m.Quotations))
+                with Dict.UnionError key ->
+                    let pos = key :?> SourcePos
+                    failwithf "Quoted expression found at the same position in two files with the same name: %s %d:%d-%d:%d"
+                        pos.FileName (fst pos.Start) (snd pos.Start) (fst pos.End) (snd pos.End)
             ResourceHashes = Dict.union (metas |> Seq.map (fun m -> m.ResourceHashes))
+            ExtraBundles = Set.unionMany (metas |> Seq.map (fun m -> m.ExtraBundles))
         }
 
     member this.DiscardExpressions() =
@@ -467,14 +489,15 @@ type ICompilation =
     abstract AddMetadataEntry : MetadataEntry * MetadataEntry -> unit
     abstract AddError : option<SourcePos> * string -> unit 
     abstract AddWarning : option<SourcePos> * string -> unit 
-              
+    abstract AddBundle : name: string * entryPoint: Statement * [<OptionalArgument; DefaultParameterValue false>] includeJsExports: bool -> ExtraBundle
+
 module IO =
     open EmbeddedResourceNames
     
     module B = Binary
 
     let EncodingProvider = B.EncodingProvider.Create()
-    let CurrentVersion = "4.2"
+    let CurrentVersion = "4.5"
     
     let MetadataEncoding =
         try
