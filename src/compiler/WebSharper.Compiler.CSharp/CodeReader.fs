@@ -56,6 +56,7 @@ type CSharpMethod =
         Body : Statement
         IsAsync : bool
         ReturnType : Type
+        AutoPropertyInlined : bool
     }  
 
 type CSharpConstructorInitializer =
@@ -1329,6 +1330,7 @@ type RoslynTransformer(env: Environment) =
             Body = body
             IsAsync = symbol.IsAsync
             ReturnType = returnType
+            AutoPropertyInlined = false
         }
 
     member this.TransformMethodDeclaration (x: MethodDeclarationData) : CSharpMethod =
@@ -1406,6 +1408,7 @@ type RoslynTransformer(env: Environment) =
             Body = if rTyp = VoidType then ExprStatement body else Return body
             IsAsync = meth.IsAsync
             ReturnType = sr.ReadType meth.ReturnType
+            AutoPropertyInlined = false
         }
 
     member this.TransformReturnStatement (x: ReturnStatementData) : Statement =
@@ -1530,27 +1533,28 @@ type RoslynTransformer(env: Environment) =
         match x.Kind with
         | AccessorDeclarationKind.GetAccessorDeclaration      
         | AccessorDeclarationKind.SetAccessorDeclaration -> 
-            let body =
+            let inl, body =
                 match body with
-                | Some b -> b
+                | Some b -> false, b
                 | _ ->
-                    // TODO : make this inlined
+                    let typ = sr.ReadNamedType symbol.ContainingType
                     let pr = symbol.AssociatedSymbol :?> IPropertySymbol
+                    not (pr.IsOverride || pr.IsVirtual || pr.ExplicitInterfaceImplementations.Length > 0),
                     if pr.IsStatic then 
                         match x.Kind with 
                         | AccessorDeclarationKind.GetAccessorDeclaration ->     
-                            Return <| ItemGet(Self, Value (String ("$" + pr.Name)), NoSideEffect)
+                            Return <| FieldGet(None, typ, pr.Name)
                         | AccessorDeclarationKind.SetAccessorDeclaration -> 
                             let v = parameterList.Head.ParameterId
-                            ExprStatement <| ItemSet(Self, Value (String ("$" + pr.Name)), Var v)
+                            ExprStatement <| FieldSet(None, typ, pr.Name, Var v)
                         | _ -> failwith "impossible"
                     else
                         match x.Kind with 
                         | AccessorDeclarationKind.GetAccessorDeclaration ->     
-                            Return <| ItemGet(This, Value (String ("$" + pr.Name)), NoSideEffect)
+                            Return <| FieldGet(Some This, typ, pr.Name)
                         | AccessorDeclarationKind.SetAccessorDeclaration -> 
                             let v = parameterList.Head.ParameterId
-                            ExprStatement <| ItemSet(This, Value (String ("$" + pr.Name)), Var v)
+                            ExprStatement <| FieldSet(Some This, typ, pr.Name, Var v)
                         | _ -> failwith "impossible"
             {
                 IsStatic = symbol.IsStatic
@@ -1558,6 +1562,7 @@ type RoslynTransformer(env: Environment) =
                 Body = body
                 IsAsync = symbol.IsAsync
                 ReturnType = returnType
+                AutoPropertyInlined = inl
             }
         | AccessorDeclarationKind.AddAccessorDeclaration
         | AccessorDeclarationKind.RemoveAccessorDeclaration ->
@@ -1567,6 +1572,7 @@ type RoslynTransformer(env: Environment) =
                 Body = body.Value
                 IsAsync = symbol.IsAsync
                 ReturnType = returnType
+                AutoPropertyInlined = false
             }
         | AccessorDeclarationKind.UnknownAccessorDeclaration -> TODO x
 

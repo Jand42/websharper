@@ -335,9 +335,9 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                 match p.SetMethod with
                 | null ->
                     if p.IsStatic then
-                        staticInits.Add <| ItemSet(Self, Value (String ("$" + p.Name)), b )
+                        staticInits.Add <| FieldSet(None, cdef, p.Name, b )
                     else
-                        inits.Add <| ItemSet(This, Value (String ("$" + p.Name)), b )
+                        inits.Add <| FieldSet(Some This, cdef, p.Name, b )
                 | setMeth ->
                     let setter = sr.ReadMethod setMeth
                     if p.IsStatic then
@@ -568,6 +568,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                                 Body = b |> FixThisScope().Fix
                                 IsAsync = false
                                 ReturnType = Unchecked.defaultof<Type>
+                                AutoPropertyInlined = false
                             } : CodeReader.CSharpMethod
                         | :? OperatorDeclarationSyntax as syntax -> 
                             syntax
@@ -588,6 +589,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                             Body = Empty
                             IsAsync = false
                             ReturnType = Unchecked.defaultof<Type>
+                            AutoPropertyInlined = false
                         } : CodeReader.CSharpMethod   
                 elif meth.MethodKind = MethodKind.EventAdd then
                     let args = meth.Parameters |> Seq.map sr.ReadParameter |> List.ofSeq
@@ -603,6 +605,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                         Body = ExprStatement b
                         IsAsync = false
                         ReturnType = sr.ReadType meth.ReturnType
+                        AutoPropertyInlined = false
                     } : CodeReader.CSharpMethod   
                 elif meth.MethodKind = MethodKind.EventRemove then
                     let args = meth.Parameters |> Seq.map sr.ReadParameter |> List.ofSeq
@@ -618,6 +621,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                         Body = ExprStatement b
                         IsAsync = false
                         ReturnType = sr.ReadType meth.ReturnType
+                        AutoPropertyInlined = false
                     } : CodeReader.CSharpMethod   
                 else
                     match meth.MethodKind with
@@ -654,9 +658,10 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                         Body = b
                         IsAsync = false
                         ReturnType = Unchecked.defaultof<Type>
+                        AutoPropertyInlined = false
                     } : CodeReader.CSharpMethod
                     
-            let getBody isInline =
+            let getBodyAndInline isInline =
                 let parsed = getParsed() 
                 let args = parsed.Parameters |> List.map (fun p -> p.ParameterId)
                 if isInline then
@@ -667,9 +672,12 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                         | Some t -> ReplaceThisWithVar(t).TransformExpression(b)
                         | _ -> b
                     let allVars = Option.toList thisVar @ args
-                    makeExprInline allVars (Application (b, allVars |> List.map Var, NonPure, None))
+                    makeExprInline allVars (Application (b, allVars |> List.map Var, NonPure, None)), true
                 else
-                    Function(args, parsed.Body)
+                    Function(args, parsed.Body), parsed.AutoPropertyInlined
+
+            let getBody isInline = 
+                getBodyAndInline isInline |> fst
 
             let getVars() =
                 // TODO: do not parse method body
@@ -693,8 +701,9 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
                     | Member.Override (td, _) when not isInline && td = def ->
                         addMethod None mAnnot mdef (N.Abstract) true Undefined
                         addMethod (Some (meth, memdef)) { mAnnot with Name = None } mdef (N.Override def) false (getBody isInline)
-                    | _ ->
-                        addMethod (Some (meth, memdef)) mAnnot mdef (if isInline then N.Inline else getKind()) false (getBody isInline)
+                    | _ ->  
+                        let body, isInline = getBodyAndInline isInline
+                        addMethod (Some (meth, memdef)) mAnnot mdef (if isInline then N.Inline else getKind()) false body
                 let checkNotAbstract() =
                     if meth.IsAbstract then
                         error "Abstract methods cannot be marked with Inline, Macro or Constant attributes."
@@ -818,13 +827,9 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
             | Some p -> p.GetAttributes() 
             | _ -> f.GetAttributes() 
         let mAnnot = sr.AttributeReader.GetMemberAnnot(annot, attrs)
-        let jsName =
-            match backingForProp with
-            | Some p -> Some ("$" + p.Name)
-            | None -> mAnnot.Name                       
         let nr =
             {
-                StrongName = jsName
+                StrongName = mAnnot.Name
                 IsStatic = f.IsStatic
                 IsOptional = mAnnot.Kind = Some A.MemberKind.OptionalField 
                 IsReadonly = f.IsReadOnly
