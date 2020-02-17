@@ -7,10 +7,9 @@ NUGET
     FAKE (4.63.2)
     FSharp.Compiler.Tools (4.1.29)
     FSharp.Core (4.2.3)
-    Mono.Cecil (0.10.1)
+    Microsoft.TypeScript.MSBuild (3.7.4)
+    Mono.Cecil (0.10.4)
     System.ValueTuple (4.3)
-  remote: https://www.myget.org/F/typescript-preview/api/v3/index.json
-    Microsoft.TypeScript.MSBuild (3.2.0-beta-20181128-1)
 
 GROUP build
 RESTRICTION: == net45
@@ -20,10 +19,10 @@ NUGET
     Chessie (0.6)
       FSharp.Core
     FAKE (4.63.2)
-    FSharp.Compiler.Tools (10.2.1)
-    FSharp.Core (4.5.4)
-    Mono.Cecil (0.10.1)
-    Newtonsoft.Json (12.0.1)
+    FSharp.Compiler.Tools (10.2.3)
+    FSharp.Core (4.7)
+    Mono.Cecil (0.11.1)
+    Newtonsoft.Json (12.0.3)
     Paket.Core (5.108)
       Chessie (>= 0.6)
       FSharp.Compiler.Tools

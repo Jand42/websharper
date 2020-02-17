@@ -12,9 +12,9 @@ nuget FAKE 4.63.2
 nuget FSharp.Compiler.Tools 4.1.29
 nuget FSharp.Core 4.2.3
 
-nuget Mono.Cecil ~> 0.10
+nuget Mono.Cecil ~> 0.10.1
 nuget System.ValueTuple 4.3.0
-nuget Microsoft.TypeScript.MSBuild ~> 3.2.0-beta
+nuget Microsoft.TypeScript.MSBuild ~> 3.7.4
 
 group fsharp4
     framework: net45, net46
