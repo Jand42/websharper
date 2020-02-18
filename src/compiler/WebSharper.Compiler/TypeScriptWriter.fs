@@ -20,7 +20,7 @@
 
 // Transforms WebSharper.Core.AST into WebSharper.JavaScript.Syntax
 // used for writing .js files
-module WebSharper.Compiler.JavaScriptWriter
+module WebSharper.Compiler.TypeScriptWriter
 
 module J = WebSharper.Core.JavaScript.Syntax
 module I = WebSharper.Core.JavaScript.Identifier

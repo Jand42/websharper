@@ -59,7 +59,7 @@ type Bundle(set: list<Assembly>, aR: AssemblyResolver, sourceMap, dce, moduleNam
         if sourceMap then
             set |> List.collect (fun a ->
                 match a.MapFileForReadable with
-                | Some mapFile -> WebSharper.Compiler.Packager.readMapFileSources mapFile
+                | Some mapFile -> WebSharper.Compiler.JavaScriptPackager.readMapFileSources mapFile
                 | _-> []
             )  
             |> Array.ofList 
@@ -141,7 +141,7 @@ type Bundle(set: list<Assembly>, aR: AssemblyResolver, sourceMap, dce, moduleNam
         | BundleMode.JavaScript | BundleMode.MinifiedJavaScript ->
             
             let pkg =   
-                Packager.packageAssembly current current resources (Some moduleName) true
+                TypeScriptPackager.packageAssembly current current resources (Some moduleName) true
 
             let pref =
                 if mode = BundleMode.JavaScript then 
@@ -157,7 +157,7 @@ type Bundle(set: list<Assembly>, aR: AssemblyResolver, sourceMap, dce, moduleNam
                     )
                 else WebSharper.Core.JavaScript.Writer.CodeWriter()    
 
-            let js, m = pkg |> WebSharper.Compiler.Packager.programToString pref getCodeWriter
+            let js, m = pkg |> WebSharper.Compiler.TypeScriptPackager.programToString pref getCodeWriter
             if sourceMap then
                 if mode = BundleMode.JavaScript then
                     map <- m

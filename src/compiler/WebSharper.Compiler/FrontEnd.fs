@@ -130,7 +130,8 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
         | _ -> []
 
     let pkg = 
-        Packager.packageAssembly refMeta current resources None false
+        JavaScriptPackager.packageAssembly refMeta current (comp |> Option.bind (fun c -> c.EntryPoint)) JavaScriptPackager.EntryPointStyle.OnLoadIfExists
+        //TypeScriptPackager.packageAssembly refMeta current resources None false
 
     TimedStage "Packaging assembly"
     
@@ -138,7 +139,7 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
         match comp, closures with
         | Some comp, Some moveToTop ->
             let cl = Closures.ExamineClosures(comp, moveToTop)
-            let clPkg = pkg |> List.map cl.TransformStatement
+            let clPkg = pkg |> cl.TransformExpression
             TimedStage "Closure analyzation"
             clPkg
         | _ -> pkg
@@ -149,9 +150,9 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
     let pkg =
         if sourceMap then
             let tr = TransformSourcePositions(assemblyName)
-            pkg |> List.map tr.TransformStatement
+            pkg |> tr.TransformExpression
         else
-            pkg |> List.map removeSourcePos.TransformStatement
+            pkg |> removeSourcePos.TransformExpression
 
     let addRes name path data = 
         match data with
@@ -184,7 +185,7 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
 
         TimedStage "Serializing metadata"
 
-    if not (List.isEmpty pkg) then
+    if pkg <> AST.Undefined then
         
         let getCodeWriter() = 
             if sourceMap then
@@ -194,7 +195,7 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
         let pu = P.PathUtility.VirtualPaths("/")
         let ai = P.AssemblyId.Create(assemblyName)
         let inline getBytes (x: string) = System.Text.Encoding.UTF8.GetBytes x
-        let js, map = pkg |> WebSharper.Compiler.Packager.programToString WebSharper.Core.JavaScript.Readable getCodeWriter
+        let js, map = pkg |> WebSharper.Compiler.JavaScriptPackager.exprToString WebSharper.Core.JavaScript.Readable getCodeWriter
         addRes EMBEDDED_TS (Some (pu.JavaScriptFileName(ai))) (Some (getBytes js))
         map |> Option.iter (fun m ->
             addRes EMBEDDED_MAP None (Some (getBytes m)))

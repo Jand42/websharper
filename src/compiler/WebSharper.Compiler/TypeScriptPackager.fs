@@ -20,7 +20,7 @@
 
 // Creates single .js files from WebSharper.Core.Metadata.Info
 // (possibly filtered by code path analysis) 
-module WebSharper.Compiler.Packager
+module WebSharper.Compiler.TypeScriptPackager
 
 open System.Collections.Generic
 
@@ -781,7 +781,7 @@ let readMapFileSources mapFile =
     | _ -> failwith "map file JSON should be an object"
 
 let programToString pref (getWriter: unit -> WebSharper.Core.JavaScript.Writer.CodeWriter) statements =
-    let program = statements |> JavaScriptWriter.transformProgram pref
+    let program = statements |> TypeScriptWriter.transformProgram pref
     let writer = getWriter()
     WebSharper.Core.JavaScript.Writer.WriteProgram pref writer program
     writer.GetCodeFile(), writer.GetMapFile()
