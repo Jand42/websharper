@@ -1,8 +1,10 @@
 @echo off
 setlocal
 
-.paket\paket.exe update -g wsbuild
+dotnet restore WebSharper.Compiler.sln
+dotnet restore WebSharper.sln
 if errorlevel 1 exit /b %errorlevel%
 
-set DOTNETSOLUTION="WebSharper.sln"
-call paket-files\wsbuild\github.com\dotnet-websharper\build-script\WebSharper.Fake.cmd %*
+set DOTNETSOLUTION="WebSharper.Compiler.sln;WebSharper.sln"
+call paket-files\wsbuild\github.com\dotnet-websharper\build-script\update.cmd
+call paket-files\wsbuild\github.com\dotnet-websharper\build-script\build.cmd %*

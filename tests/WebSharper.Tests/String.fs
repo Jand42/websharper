@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -193,13 +193,9 @@ let Tests =
             equal (String.FromCharCode(72, 69, 76, 76, 79)) "HELLO" 
         }
 
-        #if FSHARP40
-
         Test "String.filter" {
             equal (String.filter (fun _ -> true) "") ""
             equal (String.filter ((=) 'a') "abba") "aa"
         }
-
-        #endif
 
     }

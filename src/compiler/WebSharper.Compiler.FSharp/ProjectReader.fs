@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -20,7 +20,7 @@
 
 module WebSharper.Compiler.FSharp.ProjectReader
 
-open Microsoft.FSharp.Compiler.SourceCodeServices
+open FSharp.Compiler.SourceCodeServices
 open System.Collections.Generic
 
 open WebSharper.Core
@@ -47,10 +47,13 @@ type private SourceMemberOrEntity =
     | InitAction of FSharpExpr
 
 let annotForTypeOrFile name (annot: A.TypeAnnotation) =
+    let mutable annot = annot
     if annot.JavaScriptTypesAndFiles |> List.contains name then
-        if annot.IsForcedNotJavaScript then annot else
-            { annot with IsJavaScript = true }
-    else annot
+        if not annot.IsForcedNotJavaScript then 
+            annot <- { annot with IsJavaScript = true }
+    if annot.JavaScriptExportTypesAndFiles |> List.contains name then
+        annot <- { annot with IsJavaScriptExport = true }
+    annot
 
 // fixes annotation for property setters, we don't want name coflicts
 let fixMemberAnnot (getAnnot: _ -> A.MemberAnnotation) (x: FSharpEntity) (m: FSMFV) (a: A.MemberAnnotation) =
@@ -141,7 +144,7 @@ let private transformInitAction (sc: Lazy<_ * StartupCode>) (comp: Compilation) 
         let env = CodeReader.Environment.New ([], [], comp, sr)  
         statements.Add (CodeReader.transformExpression env a |> ExprStatement)   
 
-let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (ac: ArgCurrying.ResolveFuncArgs) (sr: CodeReader.SymbolReader) (classAnnots: Dictionary<FSharpEntity, TypeDefinition * A.TypeAnnotation>) parentAnnot (cls: FSharpEntity) (members: ResizeArray<SourceMemberOrEntity>) =
+let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (ac: ArgCurrying.ResolveFuncArgs) (sr: CodeReader.SymbolReader) (classAnnots: Dictionary<FSharpEntity, TypeDefinition * A.TypeAnnotation>) (cls: FSharpEntity) (members: ResizeArray<SourceMemberOrEntity>) =
     let thisDef, annot = classAnnots.[cls]
 
     if isResourceType sr cls then
@@ -155,18 +158,27 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
     let def, proxied =
         match annot.ProxyOf with
         | Some p -> 
+            let warn msg =
+                comp.AddWarning(Some (CodeReader.getRange cls.DeclarationLocation), SourceWarning msg)
             if cls.Accessibility.IsPublic then
-                comp.AddWarning(Some (CodeReader.getRange cls.DeclarationLocation), SourceWarning "Proxy type should not be public")
+                warn "Proxy type should not be public"
             let proxied =
-                let t = Reflection.LoadTypeDefinition p
-                t.GetMembers(Reflection.AllPublicMethodsFlags) |> Seq.choose Reflection.ReadMember
-                |> Seq.collect (fun m ->
-                    match m with
-                    | Member.Override (_, me) -> [ Member.Method (true, me); m ]
-                    | _ -> [ m ]
-                ) |> HashSet
+                try
+                    let t = Reflection.LoadTypeDefinition p
+                    t.GetMembers(Reflection.AllPublicMethodsFlags) |> Seq.choose Reflection.ReadMember
+                    |> Seq.collect (fun m ->
+                        match m with
+                        | Member.Override (_, me) -> [ Member.Method (true, me); m ]
+                        | _ -> [ m ]
+                    ) |> HashSet
+                with _ ->
+                    warn ("Proxy target type could not be loaded for signature verification: " + p.Value.FullName)
+                    HashSet()
             p, Some proxied
         | _ -> thisDef, None
+
+    if annot.IsJavaScriptExport then
+        comp.AddJavaScriptExport (ExportNode (TypeNode def))
 
     let clsMembers = ResizeArray()
     
@@ -197,12 +209,12 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
         | _ -> ()
         nr
 
-    let addMethod (mem: option<FSMFV * Member>) mAnnot (def: Method) kind compiled curriedArgs expr =
+    let addMethod (mem: option<FSMFV * Member>) (mAnnot: A.MemberAnnotation) (mdef: Method) kind compiled curriedArgs expr =
         match proxied, mem with
         | Some ms, Some (mem, memdef) ->
             if not <| ms.Contains memdef then
                 let candidates =
-                    let n = def.Value.MethodName
+                    let n = mdef.Value.MethodName
                     match memdef with
                     | Member.Method (i, _) ->
                         ms |> Seq.choose (fun m ->
@@ -231,23 +243,27 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                         let msg = "Proxy member do not match any member names of target class."
                         comp.AddWarning(Some (CodeReader.getRange mem.DeclarationLocation), SourceWarning msg)
                 else 
-                    let msg = sprintf "Proxy member do not match any member signatures of target class. Current: %s, candidates: %s" (string def.Value) (String.concat ", " candidates)
+                    let msg = sprintf "Proxy member do not match any member signatures of target class %s. Current: %s, candidates: %s" (string def.Value) (string mdef.Value) (String.concat ", " candidates)
                     comp.AddWarning(Some (CodeReader.getRange mem.DeclarationLocation), SourceWarning msg)
         | _ -> ()
-        clsMembers.Add (NotResolvedMember.Method (def, (getUnresolved mAnnot kind compiled curriedArgs expr)))
+        if mAnnot.IsJavaScriptExport then
+            comp.AddJavaScriptExport (ExportNode (MethodNode (def, mdef)))
+        clsMembers.Add (NotResolvedMember.Method (mdef, (getUnresolved mAnnot kind compiled curriedArgs expr)))
         
-    let addConstructor (mem: option<FSMFV * Member>) mAnnot (def: Constructor) kind compiled curriedArgs expr =
+    let addConstructor (mem: option<FSMFV * Member>) (mAnnot: A.MemberAnnotation) (cdef: Constructor) kind compiled curriedArgs expr =
         match proxied, mem with
         | Some ms, Some (mem, memdef) ->
-            if def.Value.CtorParameters.Length > 0 && not (ms.Contains memdef) then
+            if cdef.Value.CtorParameters.Length > 0 && not (ms.Contains memdef) then
                 let candidates = 
                     ms |> Seq.choose (function Member.Constructor c -> Some c | _ -> None)
                     |> Seq.map (fun m -> string m.Value) |> List.ofSeq
                 if not (mem.Accessibility.IsPrivate || mem.Accessibility.IsInternal) then
-                    let msg = sprintf "Proxy constructor do not match any constructor signatures of target class. Current: %s, candidates: %s" (string def.Value) (String.concat ", " candidates)
+                    let msg = sprintf "Proxy constructor do not match any constructor signatures of target class. Current: %s, candidates: %s" (string cdef.Value) (String.concat ", " candidates)
                     comp.AddWarning(Some (CodeReader.getRange mem.DeclarationLocation), SourceWarning msg)
         | _ -> ()
-        clsMembers.Add (NotResolvedMember.Constructor (def, (getUnresolved mAnnot kind compiled curriedArgs expr)))
+        if mAnnot.IsJavaScriptExport then
+            comp.AddJavaScriptExport (ExportNode (ConstructorNode (def, cdef)))
+        clsMembers.Add (NotResolvedMember.Constructor (cdef, (getUnresolved mAnnot kind compiled curriedArgs expr)))
 
     let annotations = Dictionary ()
         
@@ -279,7 +295,7 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
             let memdef = sr.ReadMember meth
             match memdef with
             | Member.Method (isInstance, mdef) ->
-                let expr, err = Stubs.GetMethodInline annot mAnnot isInstance def mdef
+                let expr, err = Stubs.GetMethodInline annot mAnnot (cls.IsFSharpModule && not meth.IsValCompiledAsMethod) isInstance def mdef
                 err |> Option.iter error
                 stubs.Add memdef |> ignore
                 addMethod (Some (meth, memdef)) mAnnot mdef N.Inline true None expr
@@ -316,8 +332,11 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
             | _ -> error "Only methods can be defined Remote"
         | _ -> ()
 
+    let fsharpSpecificNonException =
+        cls.IsFSharpUnion || cls.IsFSharpRecord || cls.IsValueType
+
     let fsharpSpecific = 
-        cls.IsFSharpUnion || cls.IsFSharpRecord || cls.IsFSharpExceptionDeclaration || cls.IsValueType
+        fsharpSpecificNonException || cls.IsFSharpExceptionDeclaration
 
     let fsharpModule = cls.IsFSharpModule
 
@@ -341,6 +360,14 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
             | _ -> None   
         )
         |> HashSet
+
+    let baseCls =
+        if fsharpSpecificNonException || fsharpModule || cls.IsValueType || annot.IsStub || def.Value.FullName = "System.Object" then
+            None
+        elif annot.Prototype = Some false then
+            cls.BaseType |> Option.bind (fun t -> t.TypeDefinition |> sr.ReadTypeDefinition |> ignoreSystemObject)
+        else 
+            cls.BaseType |> Option.map (fun t -> t.TypeDefinition |> sr.ReadTypeDefinition)
 
     for i = 0 to members.Count - 1 do
         let m = members.[i]
@@ -387,6 +414,16 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                 let memdef = sr.ReadMember meth
 
                 if stubs.Contains memdef then () else
+                let kind =
+                    // for Proxy projects only, handle F# inline as WS Inline
+                    if Option.isSome comp.ProxyTargetName && kind = A.MemberKind.JavaScript then
+                        match meth.InlineAnnotation with
+                        | FSharpInlineAnnotation.AggressiveInline
+                        | FSharpInlineAnnotation.AlwaysInline
+                        | FSharpInlineAnnotation.PseudoValue ->
+                            A.MemberKind.InlineJavaScript
+                        | _ -> kind
+                    else kind
                 let getBody isInline = 
                     let noCurriedOpt =
                         match memdef with
@@ -462,9 +499,8 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                         let res =
                             let b = CodeReader.transformExpression env expr 
                             let b = 
-                                match memdef with
-                                | Member.Constructor _ -> 
-                                    try CodeReader.fixCtor b
+                                if meth.IsConstructor then
+                                    try CodeReader.fixCtor def baseCls b
                                     with e ->
                                         let tryGetExprSourcePos expr =
                                             match expr with
@@ -472,7 +508,7 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                                             | _ -> None
                                         comp.AddError(tryGetExprSourcePos b, SourceError e.Message)
                                         errorPlaceholder
-                                | _ -> b
+                                else b
                             let b = FixThisScope().Fix(b)      
                             if List.isEmpty args && meth.IsModuleValueOrMember then 
                                 if isModulePattern then
@@ -606,24 +642,26 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                     | A.MemberKind.NoFallback ->
                         checkNotAbstract()
                         addM N.NoFallback true None Undefined
-                    | A.MemberKind.Inline js ->
+                    | A.MemberKind.Inline (js, dollarVars) ->
                         checkNotAbstract() 
                         let vars, thisVar = getVarsAndThis()
                         try 
-                            let parsed = WebSharper.Compiler.Recognize.createInline comp.MutableExternals thisVar vars mAnnot.Pure js
-                            if addModuleValueProp N.Inline parsed then
-                                addMethod None mAnnot mdef N.Inline true None parsed   
-                            else addM N.Inline true None parsed
+                            let parsed = WebSharper.Compiler.Recognize.createInline comp.MutableExternals thisVar vars mAnnot.Pure dollarVars js
+                            List.iter warn parsed.Warnings
+                            if addModuleValueProp N.Inline parsed.Expr then
+                                addMethod None mAnnot mdef N.Inline true None parsed.Expr
+                            else addM N.Inline true None parsed.Expr
                         with e ->
                             error ("Error parsing inline JavaScript: " + e.Message)
                     | A.MemberKind.Constant c ->
                         checkNotAbstract() 
                         addM N.Inline true None (Value c)                        
-                    | A.MemberKind.Direct js ->
+                    | A.MemberKind.Direct (js, dollarVars) ->
                         let vars, thisVar = getVarsAndThis()
                         try
-                            let parsed = WebSharper.Compiler.Recognize.parseDirect comp.MutableExternals thisVar vars js
-                            addM (getKind()) true None parsed
+                            let parsed = WebSharper.Compiler.Recognize.parseDirect comp.MutableExternals thisVar vars dollarVars js
+                            List.iter warn parsed.Warnings
+                            addM (getKind()) true None parsed.Expr
                         with e ->
                             error ("Error parsing direct JavaScript: " + e.Message)
                     | A.MemberKind.JavaScript ->
@@ -645,10 +683,14 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                     | A.MemberKind.Remote _ 
                     | A.MemberKind.Stub -> failwith "should be handled previously"
                     if mAnnot.IsEntryPoint then
-                        let ep = ExprStatement <| Call(None, NonGeneric def, NonGeneric mdef, [])
-                        if comp.HasGraph then
-                            comp.Graph.AddEdge(EntryPointNode, MethodNode (def, mdef))
-                        comp.SetEntryPoint(ep)
+                        match memdef with
+                        | Member.Method (false, mdef) when List.isEmpty mdef.Value.Parameters ->
+                            let ep = ExprStatement <| Call(None, NonGeneric def, NonGeneric mdef, [])
+                            if comp.HasGraph then
+                                comp.Graph.AddEdge(EntryPointNode, MethodNode (def, mdef))
+                            comp.SetEntryPoint(ep)
+                        | _ ->
+                            error "The SPAEntryPoint must be a static method with no arguments"
                 | Member.Constructor cdef ->
                     let addC = addConstructor (Some (meth, memdef)) mAnnot cdef
                     let jsCtor isInline =   
@@ -659,18 +701,20 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                     match kind with
                     | A.MemberKind.NoFallback ->
                         addC N.NoFallback true None Undefined
-                    | A.MemberKind.Inline js ->
+                    | A.MemberKind.Inline (js, dollarVars) ->
                         let vars, thisVar = getVarsAndThis()
                         try
-                            let parsed = WebSharper.Compiler.Recognize.createInline comp.MutableExternals thisVar vars mAnnot.Pure js
-                            addC N.Inline true None parsed 
+                            let parsed = WebSharper.Compiler.Recognize.createInline comp.MutableExternals thisVar vars mAnnot.Pure dollarVars js
+                            List.iter warn parsed.Warnings
+                            addC N.Inline true None parsed.Expr
                         with e ->
                             error ("Error parsing inline JavaScript: " + e.Message)
-                    | A.MemberKind.Direct js ->
+                    | A.MemberKind.Direct (js, dollarVars) ->
                         let vars, thisVar = getVarsAndThis()
                         try
-                            let parsed = WebSharper.Compiler.Recognize.parseDirect comp.MutableExternals thisVar vars js
-                            addC N.Static true None parsed 
+                            let parsed = WebSharper.Compiler.Recognize.parseDirect comp.MutableExternals thisVar vars dollarVars js
+                            List.iter warn parsed.Warnings
+                            addC N.Static true None parsed.Expr
                         with e ->
                             error ("Error parsing direct JavaScript: " + e.Message)
                     | A.MemberKind.JavaScript -> jsCtor false
@@ -702,7 +746,7 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
                 addMethod None A.MemberAnnotation.BasicJavaScript mdef (N.Quotation(pos, argNames)) false None e 
             )
         | SourceEntity (ent, nmembers) ->
-            transformClass sc comp ac sr classAnnots annot ent nmembers |> Option.iter comp.AddClass   
+            transformClass sc comp ac sr classAnnots ent nmembers |> Option.iter comp.AddClass   
         | SourceInterface i ->
             transformInterface sr annot i |> Option.iter comp.AddInterface
         | InitAction expr ->
@@ -717,14 +761,6 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
         elif (annot.IsJavaScript && (isAbstractClass cls || cls.IsFSharpExceptionDeclaration)) || (annot.Prototype = Some true)
         then NotResolvedClassKind.WithPrototype
         else NotResolvedClassKind.Class
-
-    let baseCls =
-        if fsharpSpecific || fsharpModule || cls.IsValueType || annot.IsStub || def.Value.FullName = "System.Object" then
-            None
-        elif annot.Prototype = Some false then
-            cls.BaseType |> Option.bind (fun t -> t.TypeDefinition |> sr.ReadTypeDefinition |> ignoreSystemObject)
-        else 
-            cls.BaseType |> Option.map (fun t -> t.TypeDefinition |> sr.ReadTypeDefinition)
 
     let hasWSPrototype =                
         hasWSPrototype ckind baseCls clsMembers
@@ -956,7 +992,7 @@ let rec private transformClass (sc: Lazy<_ * StartupCode>) (comp: Compilation) (
             IsProxy = Option.isSome annot.ProxyOf
             Macros = annot.Macros
             ForceNoPrototype = (annot.Prototype = Some false) || hasConstantCase
-            ForceAddress = hasSingletonCase
+            ForceAddress = hasSingletonCase || def.Value.FullName = "System.Exception" // needed for Error inheritance
         }
     )
 
@@ -964,20 +1000,37 @@ open WebSharper.Compiler.FrontEnd
 
 let transformAssembly (comp : Compilation) assemblyName (config: WsConfig) (checkResults: FSharpCheckProjectResults) =   
     comp.AssemblyName <- assemblyName
+    comp.ProxyTargetName <- config.ProxyTargetName
     let sr = CodeReader.SymbolReader(comp)    
     
-    let asmAnnot = sr.AttributeReader.GetAssemblyAnnot(checkResults.AssemblySignature.Attributes)
+    let mutable asmAnnot =
+        sr.AttributeReader.GetAssemblyAnnot(checkResults.AssemblySignature.Attributes)
 
-    let asmAnnot =
-        match config.JavaScriptScope with
-        | JSDefault -> asmAnnot
-        | JSAssembly -> { asmAnnot with IsJavaScript = true }
-        | JSFilesOrTypes a -> { asmAnnot with JavaScriptTypesAndFiles = asmAnnot.JavaScriptTypesAndFiles @ List.ofArray a }
+    match config.JavaScriptScope with
+    | JSDefault -> ()
+    | JSAssembly -> asmAnnot <- { asmAnnot with IsJavaScript = true }
+    | JSFilesOrTypes a -> asmAnnot <- { asmAnnot with JavaScriptTypesAndFiles = List.ofArray a @ asmAnnot.JavaScriptTypesAndFiles }
+
+    match config.ProjectType with
+    | Some Proxy -> asmAnnot <- { asmAnnot with IsJavaScript = true }
+    | _ ->  ()
+
+    for jsExport in config.JavaScriptExport do
+        comp.AddJavaScriptExport jsExport
+        match jsExport with
+        | ExportCurrentAssembly -> asmAnnot <- { asmAnnot with IsJavaScript = true }
+        | ExportByName n -> asmAnnot <- { asmAnnot with JavaScriptTypesAndFiles = n :: asmAnnot.JavaScriptTypesAndFiles }
+        | _ -> ()
 
     let rootTypeAnnot = asmAnnot.RootTypeAnnot
 
     comp.AssemblyRequires <- asmAnnot.Requires
     comp.SiteletDefinition <- asmAnnot.SiteletDefinition
+
+    if asmAnnot.IsJavaScriptExport then
+        comp.AddJavaScriptExport ExportCurrentAssembly
+    for s in asmAnnot.JavaScriptExportTypesFilesAndAssemblies do
+        comp.AddJavaScriptExport (ExportByName s)
 
     comp.CustomTypesReflector <- A.reflectCustomType
     
@@ -1104,7 +1157,7 @@ let transformAssembly (comp : Compilation) assemblyName (config: WsConfig) (chec
             let name = "StartupCode$" + assemblyName.Replace('.', '_') + "$" + (System.IO.Path.GetFileNameWithoutExtension filePath).Replace('.', '_')
             let def =
                 TypeDefinition {
-                    Assembly = assemblyName
+                    Assembly = comp.FindProxiedAssembly(assemblyName)
                     FullName = name
                 }
             def, 
@@ -1155,7 +1208,7 @@ let transformAssembly (comp : Compilation) assemblyName (config: WsConfig) (chec
             | SourceMember _ -> failwith "impossible: top level member"
             | InitAction _ -> failwith "impossible: top level init action"
             | SourceEntity (c, m) ->
-                transformClass sc comp argCurrying sr classAnnotations rootTypeAnnot c m |> Option.iter comp.AddClass
+                transformClass sc comp argCurrying sr classAnnotations c m |> Option.iter comp.AddClass
             | SourceInterface i ->
                 transformInterface sr rootTypeAnnot i |> Option.iter comp.AddInterface
             

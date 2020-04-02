@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -22,6 +22,7 @@ namespace WebSharper.JavaScript.Html5
 
 open WebSharper.InterfaceGenerator
 open WebSharper.JavaScript
+open WebSharper.JavaScript.Ecma.Definition
 
 module Utils =
     let RenamedEnumStrings n f l =
@@ -550,7 +551,7 @@ module File =
         Class "Blob"
         |+> Static [
                 Constructor T<unit>
-                Constructor ((Type.ArrayOf TypedArrays.ArrayBuffer + Type.ArrayOf TypedArrays.ArrayBufferView + TSelf + T<string>) * !?BlobPropertyBag)
+                Constructor ((Type.ArrayOf TypedArrays.ArrayBuffer + Type.ArrayOf TypedArrays.ArrayBufferView + Type.ArrayOf TSelf + Type.ArrayOf T<string>) * !?BlobPropertyBag)
             ]
         |+> Instance [
                 "size" =? T<int>
@@ -564,7 +565,7 @@ module File =
         |=> Inherits Blob
         |+> Instance [
                 "name" =? T<string>
-                "lastModifiedDate" =? Ecma.Definition.EcmaDate |> Obsolete
+                "lastModifiedDate" =? EcmaDate |> Obsolete
                 "lastModifed" =? T<int>
                 "size" =? T<int>
             ]
@@ -763,7 +764,7 @@ module Elements =
             "checked" =@ T<bool>
             "dirName" =@ T<string>
             "form" =? HTMLFormElement
-            "file" =? File.FileList
+            "files" =? File.FileList
             "formAction" =@ T<string>
             "formEnctype" =@ T<string>
             "formMethod" =@ T<string>
@@ -1101,7 +1102,7 @@ module Elements =
             "defaultPlaybackRate" =@ T<float>
             "playbackRate" =@ T<float>
 
-            "startOffsetTime" =? Ecma.Definition.EcmaDate
+            "startOffsetTime" =? EcmaDate
             "played" =? TimeRanges
             "seekable" =? TimeRanges
             "ended" =? T<bool>
@@ -1179,7 +1180,7 @@ module Geolocation =
         Class "Position"
         |+> Instance [
             "coords" =? Coordinates
-            "timestamp" =? Ecma.Definition.EcmaDate
+            "timestamp" =? EcmaDate
         ]
 
     let PositionError = 
@@ -1257,65 +1258,326 @@ module AppCache =
             ///  Function onobsolete;
         ]
 
-module WebWorkers =
+module Fetch =
 
-    let WorkerNavigator = Class "WorkerNavigator"
-    let MessagePortArray = Class "MessagePortArray"
-
-    let WorkerUtils =
-        Class "WorkerUtils"
+    let XMLHttpRequestResponseType =
+        Pattern.EnumStrings "XMLHttpRequestResponseType" [
+            "arraybuffer"
+            "blob"
+            "document"
+            "json"
+            "text"
+        ]
         |+> Static [
-            "importScripts" => (!+ T<string>) ^-> T<unit>
-            "navigator" =? WorkerNavigator
+            "deafult" => T<string> 
+            |> WithInline ""
+            |> WithComment "The default value is text"
         ]
 
-    let WorkerLocation =
-        Class "WorkerLocation"
-
-    let WorkerGlobalScope = 
-        let WorkerGlobalScope = Class "WorkerGlobalScope"
-        WorkerGlobalScope
-        // |=> Implements [T<EventTarget>; WorkerUtils]
+    let XMLHttpRequestEventTarget =
+        let EH = Dom.Interfaces.Event ^-> T<unit>
+        Class "XMLHttpRequestEventTarget"
+        |=> Inherits Dom.Interfaces.EventTarget
         |+> Instance [
-            "self" =? WorkerGlobalScope
-            "location" =? WorkerLocation
-            "close" => T<unit> ^-> T<unit>
-            // attribute Function onerror;
+            "onloadstart" =@ EH
+            "onprogress" =@ EH
+            "onabort" =@ EH
+            "onerror" =@ EH
+            "onload" =@ EH
+            "ontimeout" =@ EH
+            "onloadend" =@ EH
         ]
-    
-    let SharedWorkerScope =   
-        Class "SharedWorkerGlobalScope"
-            |=> Inherits WorkerGlobalScope
-            |+> Instance [
-                "name" =? T<string>
-                "applicationCache" =? AppCache.ApplicationCache
-                //           attribute Function onconnect;
-            ]
 
-    let DedicatedWorkerGlobalScope =
-        Class "DedicatedWorkerGlobalScope"
-        |=> Inherits WorkerGlobalScope
-        |+> Instance [
-            "postMessage" => (T<obj> * !? MessagePortArray) ^-> T<unit>
-            /// attribute Function onmessage;
-            
-        ]
-        
-    let AbstractWorker =
-        Class "AbstractWorker"
-        // |=> Implements [T<EventTarget>]
-        |+> Instance [
-            // attribute Function onerror;
-            ]
+    let XMLHttpRequestUpload =
+        Class "XMLHttpRequestUpload"
+        |=> Inherits XMLHttpRequestEventTarget
 
-    let Worker =           
-        Class "Worker"
-        |=> Inherits AbstractWorker
-        |+> Instance [
-            "terminate" => T<unit> ^-> T<unit>
-            "postMessage" => (T<obj> * !? MessagePortArray) ^-> T<unit>
-            // attribute Function onmessage;
+    let XMLHttpRequest =
+        let EH = Dom.Interfaces.Event ^-> T<unit>
+        Class "XMLHttpRequest"
+        |=> Inherits XMLHttpRequestEventTarget
+        |+> Static [
+            Constructor T<unit>
+
+            "UNSENT" =? T<int>
+            "OPENED" =? T<int>
+            "HEADERS_RECEIVED" =? T<int>
+            "LOADING" =? T<int>
+            "DONE" =? T<int>
         ]
+        |+> Instance [
+            "onreadystatechange" =@ EH
+            "readyState" =? T<int>
+
+            // request
+            "open" => T<string>?``method`` * T<string>?url ^-> T<unit>
+            "open" => T<string>?``method`` * T<string>?url * T<bool>?async * !?T<string>?username * !?T<string>?password ^-> T<unit>
+            "setRequestHeader" => T<string>?name * T<string>?value ^-> T<unit>
+            "timeout" =@ T<int>
+            "withCredentials" =@ T<bool>
+            "upload" =? XMLHttpRequestUpload
+            "send" => !?Dom.Interfaces.Document?body ^-> T<unit>
+            "abort" => T<unit> ^-> T<unit>
+
+            // response
+            "responseURL" =? T<string>
+            "status" =? T<int>
+            "statusText" =? T<string>
+            "getResponseHeader" => T<string> ^-> T<string>
+            "getAllResponseHeaders" => T<unit> ^-> T<string>
+            "overrideMimeType" => T<string>?mime ^-> T<unit>
+            "responseType" =@ XMLHttpRequestResponseType
+            "response" =? T<obj>
+            "responseText" =? T<string>
+            "responseXML" =? Dom.Interfaces.Document
+        ]
+
+    let FormDataEntryValue = T<string> + File.File
+
+    let FormData =
+        Class "FormData"
+        |+> Instance [
+            Constructor(!? Elements.HTMLFormElement?form)
+            "append" => T<string>?names * T<string>?value ^-> T<unit> 
+            "append" => T<string>?names * File.Blob?blobValue * !? T<string>?filename ^-> T<unit> 
+            "delete" => T<string>?name ^-> T<unit> 
+            "get" => T<string>?name ^-> FormDataEntryValue
+            "getAll" => T<string>?name ^-> !|FormDataEntryValue
+            "has"  => T<string>?name ^-> T<bool>
+            "set" => T<string>?names * T<string>?value ^-> T<unit> 
+            "set" => T<string>?names * File.Blob?blobValue * !? T<string>?filename ^-> T<unit> 
+            "" =@ FormDataEntryValue |> Indexed T<string> 
+            // TODO: entries iterator
+            // TODO: keys iterator
+            // TODO: values iterator
+        ]
+
+    let URLSearchParams =
+        Class "URLSearchParams"
+        |+> Static [
+            Constructor T<string>
+            Constructor T<(string * string)[]>
+            Constructor T<string[]>
+            Constructor EcmaObjectG.[T<string>]
+        ]
+        |+> Instance [
+            "append" => T<string>?key * T<string>?value ^-> T<unit>
+            "delete" => T<string>?key ^-> T<unit>
+            "get" => T<string>?key ^-> T<string>
+            "getAll" => T<string>?key ^-> T<string[]>
+            "has" => T<string>?key ^-> T<bool>
+            "set" => T<string>?key * T<string>?value ^-> T<unit>
+            "sort" => T<unit> ^-> T<unit>
+        ]
+
+    let URL =
+        Class "URL"
+        |+> Static [
+            Constructor (T<string>?url * !?T<string>?``base``)
+        ]
+        |+> Instance [
+            "hash" =@ T<string>
+            "host" =@ T<string>
+            "hostname" =@ T<string>
+            "href" =@ T<string>
+            "origin" =? T<string>
+            "password" =@ T<string>
+            "pathname" =@ T<string>
+            "port" =@ T<string>
+            "protocol" =@ T<string>
+            "search" =@ T<string>
+            "searchParams" =? URLSearchParams
+            "username" =@ T<string>
+        ]
+        |+> Static [
+            "createObjectURL" => (File.Blob + File.File) ^-> T<string>
+            "revokeObjectURL" => T<string> ^-> T<unit>
+        ]
+
+    let Headers =
+        Class "Headers"
+        |+> Static [
+            Constructor T<unit>
+            Constructor TSelf
+            Constructor EcmaObjectG.[T<string>]
+        ]
+        |+> Instance [
+            "append" => T<string> * T<string> ^-> T<unit>
+            "delete" => T<string> ^-> T<unit>
+            "get" => T<string> ^-> T<string>
+            "has" => T<string> ^-> T<bool>
+            "set" => T<string> * T<string> ^-> T<unit>
+            // TODO: entries iterator
+            // TODO: keys iterator
+            // TODO: values iterator
+        ]
+
+    let Mode =
+        Pattern.EnumStrings "RequestMode" [
+            "same-origin"
+            "no-cors"
+            "cors"
+            "navigate"
+        ]
+
+    let Credentials =
+        Pattern.EnumStrings "RequestCredentials" [
+            "omit"
+            "same-origin"
+            "include"
+        ]
+
+    let Cache =
+        Pattern.EnumStrings "RequestCache" [
+            "default"
+            "no-store"
+            "reload"
+            "no-cache"
+            "force-cache"
+            "only-if-cached"
+        ]
+
+    let Redirect =
+        Pattern.EnumStrings "Redirect" [
+            "follow"
+            "error"
+            "manual"
+        ]
+
+    let Referrer =
+        Pattern.EnumStrings "Referrer" [
+            "no-referrer"
+            "client"
+        ]
+        |+> Static [
+            "url" => T<string>?url ^-> TSelf
+            |> WithInline "$url"
+        ]
+
+    let ReferrerPolicy =
+        Pattern.EnumStrings "ReferrerPolicy" [
+            "no-referrer"
+            "no-referrer-when-downgrade"
+            "origin"
+            "origin-when-cross-origin"
+            "unsafe-url"
+        ]
+
+    let RequestOptions =
+        Pattern.Config "RequestOptions" {
+            Required = []
+            Optional =
+                [
+                    "method", T<string>
+                    "headers", Headers.Type
+                    "body", T<obj>
+                    "mode", Mode.Type
+                    "credentials", Credentials.Type
+                    "cache", Cache.Type
+                    "redirect", Redirect.Type
+                    "referrer", Referrer.Type
+                    "referrerPolicy", ReferrerPolicy.Type
+                    "integrity", T<string>
+                    "keepalive", T<bool>
+                    // "signal", AbortSignal // Experimental
+                ]
+        }
+
+    let Body =
+        Instance [
+            // "body" =? ReadableStream // Experimental
+            "bodyUsed" =? T<bool>
+            "arrayBuffer" => T<unit> ^-> EcmaPromise.[TypedArrays.ArrayBuffer]
+            "blob" => T<unit> ^-> EcmaPromise.[File.Blob]
+            "formData" => T<unit> ^-> EcmaPromise.[FormData]
+            "json" => T<unit> ^-> EcmaPromise.[T<obj>]
+            "text" => T<unit> ^-> EcmaPromise.[T<string>]
+        ]
+
+    let RequestDestination =
+        Pattern.EnumStrings "RequestDestination" [
+            "audio"
+            "audioworklet"
+            "document"
+            "embed"
+            "font"
+            "image"
+            "manifest"
+            "object"
+            "paintworklet"
+            "report"
+            "script"
+            "serviceworker"
+            "sharedworker"
+            "style"
+            "track"
+            "video"
+            "worker"
+            "xslt"
+        ]
+
+    let Request =
+        Class "Request"
+        |+> Static [
+            Constructor (T<string> * !? RequestOptions)
+            Constructor TSelf
+        ]
+        |+> Instance [
+            "cache" =? Cache
+            "credentials" =? Credentials
+            "destination" =? RequestDestination
+            "headers" =? Headers
+            "integrity" =? T<string>
+            "method" =? T<string>
+            "mode" =? Mode
+            "redirect" =? Redirect
+            "referrer" =? Referrer
+            "referrerPolicy" =? ReferrerPolicy
+            "url" =? T<string>
+            "clone" => T<unit> ^-> TSelf
+        ]
+        |+> Body
+
+    let ResponseOptions =
+        Pattern.Config "ResponseOptions" {
+            Required = []
+            Optional =
+                [
+                    "status", T<int>
+                    "statusText", T<string>
+                    "headers", Headers.Type
+                ]
+        }
+
+    let ResponseType =
+        Pattern.EnumStrings "ResponseType" [
+            "basic"
+            "cors"
+            "error"
+            "opaque"
+            "opaqueredirect"
+        ]
+
+    let Response =
+        let bodyTypes = File.Blob + FormData (*+ ReadableStream *) + URLSearchParams + T<string>
+        Class "Response"
+        |+> Static [
+            Constructor (!?bodyTypes * !?ResponseOptions)
+            "error" => T<unit> ^-> TSelf
+            "redirect" => T<string>?url * T<int>?status ^-> TSelf
+        ]
+        |+> Instance [
+            "headers" =? Headers
+            "ok" =? T<bool>
+            "redirected" =? T<bool>
+            "status" =? T<int>
+            "statusText" =? T<string>
+            "type" =? ResponseType
+            "url" =? T<string>
+            "useFinalURL" =? T<bool>
+            "clone" => T<unit> ^-> TSelf
+        ]
+        |+> Body
 
 module General = 
     let BarProp =
@@ -1383,14 +1645,23 @@ module General =
             "clearRedo" => T<unit> ^-> T<unit> 
         ]
 
-    let WindowProxyType = Class "Window"
-    let MessagePortType = Class "MessagePort"
+    let Window = Class "Window"
+    let MessagePort = Class "MessagePort"
 
-
+    let ErrorEvent =
+        Class "ErrorEvent"
+        |=> Inherits Dom.Interfaces.Event
+        |+> Instance [
+            "message" =? T<string>
+            "filename" =? T<string>
+            "lineno" =? T<int>
+            "colno" =? T<int>
+            "error" =? T<obj>
+        ]
 
     let MessageEvent =
         Class "MessageEvent"
-        // |=> Implements [T<Event>]
+        |=> Inherits Dom.Interfaces.Event
         |+> Static [
             Constructor (T<string> * !?T<obj>)
         ]
@@ -1398,20 +1669,21 @@ module General =
             "data" =? T<obj>
             "origin" =? T<string>
             "lastEventId" =? T<string>
-            "source" =? WindowProxyType
-            "ports" =? Type.ArrayOf(MessagePortType)
-            "initMessageEvent" => T<string> * T<bool> * T<bool> * T<obj> * T<string> * T<string> * WindowProxyType * Type.ArrayOf(MessagePortType) ^-> T<unit>
+            "source" =? Window
+            "ports" =? Type.ArrayOf(MessagePort)
+            "initMessageEvent" => T<string> * T<bool> * T<bool> * T<obj> * T<string> * T<string> * Window * Type.ArrayOf(MessagePort) ^-> T<unit>
                 |> Obsolete
         ]
 
-    let MessagePort =
-        MessagePortType
+    do
+        MessagePort
         |+> Instance [
-            "postMessage" => T<obj> * Type.ArrayOf(MessagePortType) ^-> T<unit>
+            "postMessage" => T<obj> * Type.ArrayOf(MessagePort) ^-> T<unit>
             "start" => T<unit> ^-> T<unit>
             "close" => T<unit> ^-> T<unit>
             "onmessage" =@ MessageEvent ^-> T<unit>
         ]
+        |> ignore
 
     let Navigator =
         Class "Navigator" 
@@ -1438,12 +1710,33 @@ module General =
             "setProperty" => T<string>?propertyName * !? T<string>?value * !? T<string>?priority ^-> T<unit>
         ]
 
-    let Window = 
-        let f = Dom.Interfaces.Event ^-> T<unit>
-        WindowProxyType
+    let WindowOrWorkerGlobalScope =
+        Class "WindowOrWorkerGlobalScope"
         |=> Inherits Dom.Interfaces.EventTarget
+        |+> Instance [
+            // "caches" =? CacheStorage
+            // "indexedDB" =? IDBFactory
+            "isSecureContext" =? T<bool>
+            "origin" =? T<string>
+
+            "atob" => T<string> ^-> T<string>
+            "btoa" => T<string> ^-> T<string>
+
+            "setInterval" => (T<unit> ^-> T<unit>)?callback * T<int>?delay ^-> T<obj>
+            "setTimeout" => (T<unit> ^-> T<unit>)?callback * !?T<int>?delay ^-> T<obj>
+            "clearInterval" => T<obj>?intervalId ^-> T<unit>
+            "clearTimeout" => T<obj>?timeoutId ^-> T<unit>
+
+            "fetch" => T<string> * !?Fetch.RequestOptions ^-> EcmaPromise.[Fetch.Response]
+            "fetch" => Fetch.Request ^-> EcmaPromise.[Fetch.Response]
+        ]
+
+    do
+        let f = Dom.Interfaces.Event ^-> T<unit>
+        Window
+        |=> Inherits WindowOrWorkerGlobalScope
         |+> Static [
-            "self" =? WindowProxyType
+            "self" =? Window
             |> WithGetterInline "window"
             |> ObsoleteWithMessage "Use JS.Window instead."
         ]
@@ -1494,17 +1787,17 @@ module General =
             "focus" => T<unit> ^-> T<unit>
                 |> WithComment "Makes a request to bring the window to the front"
 
-            "frames" =? WindowProxyType
+            "frames" =? Window
             "length" =? T<int>
-            "top" =? WindowProxyType
-            "opener" =? WindowProxyType
-            "parent" =? WindowProxyType
+            "top" =? Window
+            "opener" =? Window
+            "parent" =? Window
             "frameElement" =? Dom.Interfaces.Element
-            "open" => (T<string> * T<string> * T<string> * T<string>) ^->  WindowProxyType
-            "open" => (T<string> * T<string> * T<string>) ^->  WindowProxyType
-            "open" => (T<string> * T<string>) ^->  WindowProxyType
-            "open" => (T<string>) ^->  WindowProxyType
-            "open" => (T<unit>) ^->  WindowProxyType
+            "open" => (T<string> * T<string> * T<string> * T<string>) ^->  Window
+            "open" => (T<string> * T<string> * T<string>) ^->  Window
+            "open" => (T<string> * T<string>) ^->  Window
+            "open" => (T<string>) ^->  Window
+            "open" => (T<unit>) ^->  Window
             "close" => T<unit> ^-> T<unit>
 
             "navigator" =? Navigator
@@ -1605,6 +1898,145 @@ module General =
             "onunload" =@ f
             "onvolumechange" =@ f
             "onwaiting" =@ f
+
+            "NaN" =? T<double> |> WithGetterInline "NaN"
+            "Infinity" =? T<double> |> WithGetterInline "Infinity"
+            "undefined" =? T<obj> |> WithGetterInline "undefined"
+            "eval" => T<string>?expr ^-> T<obj> |> WithInline "eval($expr)"
+            "parseInt" => T<string>?str * !?T<int>?radix ^-> T<int> |> WithInline "parseInt($str, $radix)"
+            "parseFloat" => T<string>?str ^-> T<double> |> WithInline "parseFloat($str)"
+            "isNaN" => T<obj>?number ^-> T<bool> |> WithInline "isNaN($number)"
+            "isFinite" => (T<int> + T<float>)?number ^-> T<bool> |> WithInline "isFinite($number)"
+            "decodeURI" => T<string>?str ^-> T<string> |> WithInline "decodeURI($str)"
+            "decodeURIComponent" => T<string>?str ^-> T<string> |> WithInline "decodeURIComponent($str)"
+            "encodeURI" => T<string>?str ^-> T<string> |> WithInline "encodeURI($str)"
+            "encodeURIComponent" => T<string>?str ^-> T<string> |> WithInline "encodeURIComponent($str)"
+        ]
+        |> ignore
+
+module WebWorkers =
+
+    let WorkerType =
+        Pattern.EnumStrings "WorkerType" ["classic"; "module"]
+
+    let WorkerOptions =
+        Pattern.Config "WorkerOptions" {
+            Required = []
+            Optional =
+                [
+                    "type", WorkerType.Type
+                    "credentials", T<string>
+                    "name", T<string>
+                ]
+        }
+
+    let WorkerNavigator =
+        Class "WorkerNavigator"
+        |+> Instance [
+            "hardwareConcurrency" =? T<int>
+            "language" =? T<string>
+            "languages" =? Type.ArrayOf T<string>
+            "onLine" =? T<bool>
+            "userAgent" =? T<string>
+        ]
+
+    let WorkerUtils =
+        Class "WorkerUtils"
+        |+> Static [
+            "importScripts" => (!+ T<string>) ^-> T<unit>
+            "navigator" =? WorkerNavigator
+        ]
+
+    let WorkerLocation =
+        Class "WorkerLocation"
+        |+> Instance [
+            "href" =? T<string>
+            "protocol" =? T<string>
+            "host" =? T<string>
+            "hostname" =? T<string>
+            "origin" =? T<string>
+            "port" =? T<string>
+            "pathname" =? T<string>
+            "search" =? T<string>
+            "hash" =? T<string>
+        ]
+
+    let WorkerGlobalScope = 
+        Class "WorkerGlobalScope"
+        |=> Inherits General.WindowOrWorkerGlobalScope
+        |+> Instance [
+            "navigator" =? WorkerNavigator
+            "self" =? TSelf
+            "location" =? WorkerLocation
+            "onerror" =? General.ErrorEvent ^-> T<unit>
+            "onoffline" =? Dom.Interfaces.Event ^-> T<unit>
+            "ononline" =? Dom.Interfaces.Event ^-> T<unit>
+            "onlanguagechange" =? Dom.Interfaces.Event ^-> T<unit>
+            "importScripts" => !+T<string> ^-> T<unit>
+        ]
+
+    let DedicatedWorkerGlobalScope =
+        Class "DedicatedWorkerGlobalScope"
+        |=> Inherits WorkerGlobalScope
+        |+> Instance [
+            "onmessage" =@ General.MessageEvent ^-> T<unit>
+            "onmessageerror" =@ General.MessageEvent ^-> T<unit>
+            "close" => T<unit> ^-> T<unit>
+            "postMessage" => !?T<obj>?message * !?T<obj[]>?transferList ^-> T<unit>
+        ]
+
+    let SharedWorkerGlobalScope =
+        Class "SharedWorkerGlobalScope"
+        |=> Inherits WorkerGlobalScope
+        |+> Instance [
+            "name" =? T<string>
+            "applicationCache" =? AppCache.ApplicationCache
+            "onconnect" =@ Dom.Interfaces.Event ^-> T<unit>
+            "close" => T<unit> ^-> T<unit>
+        ]
+
+    let AbstractWorker =
+        Interface "AbstractWorker"
+        |+> [
+            "onerror" =@ General.ErrorEvent ^-> T<unit>
+        ]
+
+    let Worker =
+        Class "Worker"
+        |=> Inherits Dom.Interfaces.EventTarget
+        |=> Implements [AbstractWorker]
+        |+> Static [
+            Constructor (T<string>?url * !?WorkerOptions)
+            Constructor (DedicatedWorkerGlobalScope ^-> T<unit>)
+            |> WithMacro typeof<WebSharper.Core.Macros.WebWorker>
+            |> WithComment "Create a Web Worker with the given expression as entry point. \
+                A bundled JavaScript file named <assemblyname>.worker.js is automatically compiled for it."
+            Constructor (T<string>?name * (DedicatedWorkerGlobalScope ^-> T<unit>))
+            |> WithMacro typeof<WebSharper.Core.Macros.WebWorker>
+            |> WithComment "Create a Web Worker with the given expression as entry point. \
+                A bundled JavaScript file named <assemblyname>.<name>.js is automatically compiled for it."
+            Constructor (T<string>?name * T<bool>?includeJsExports * (DedicatedWorkerGlobalScope ^-> T<unit>))
+            |> WithMacro typeof<WebSharper.Core.Macros.WebWorker>
+            |> WithComment "Create a Web Worker with the given expression as entry point. \
+                A bundled JavaScript file named <assemblyname>.<name>.js is automatically compiled for it.
+                If includeJsExports is true, values marked [JavaScriptExport] are included in the bundle."
+        ]
+        |+> Instance [
+            "onmessage" =@ General.MessageEvent ^-> T<unit>
+            "onmessageerror" =@ General.MessageEvent ^-> T<unit>
+            "postMessage" => !?T<obj>?message * !?T<obj[]>?transferList ^-> T<unit>
+            "terminate" => T<unit> ^-> T<unit>
+        ]
+
+    let SharedWorker =
+        Class "SharedWorker"
+        |=> Inherits Dom.Interfaces.EventTarget
+        |=> Implements [AbstractWorker]
+        |+> Static [
+            Constructor (T<string>?url * !?WorkerOptions)
+        ]
+        |+> Instance [
+            "port" =? General.MessagePort
         ]
 
 module WebGL =
@@ -1672,7 +2104,7 @@ module WebGL =
     let RenderingContextClass =
         RenderingContext
         |+> Instance
-            [
+            (List.ofArray [|
                 // GLEnum constants
                 "DEPTH_BUFFER_BIT" =? T<int>
                 "STENCIL_BUFFER_BIT" =? T<int>
@@ -2133,7 +2565,7 @@ module WebGL =
                 "vertexAttrib4fv" => T<int>?indx * (Type.ArrayOf T<float>)?values ^-> T<unit>
                 "vertexAttribPointer" => T<int>?indx * T<int>?size * Enum?typ * T<bool>?normalized * T<int>?stride * T<int>?offset ^-> T<unit>
                 "viewport" => T<int>?x * T<int>?y * T<int>?width * T<int>?height ^-> T<unit>
-            ]
+            |])
 
     let ContextAttributesClass =
         ContextAttributes
@@ -2277,14 +2709,36 @@ module Definition =
                 File.FileReaderReadyState
                 File.ProgressEvent
                 File.TextFileReader
+                Fetch.XMLHttpRequest
+                Fetch.XMLHttpRequestEventTarget
+                Fetch.XMLHttpRequestResponseType
+                Fetch.XMLHttpRequestUpload
+                Fetch.FormData
+                Fetch.URL
+                Fetch.URLSearchParams
+                Fetch.Headers
+                Fetch.Mode
+                Fetch.Credentials
+                Fetch.Cache
+                Fetch.Redirect
+                Fetch.Referrer
+                Fetch.ReferrerPolicy
+                Fetch.RequestOptions
+                Fetch.RequestDestination
+                Fetch.Request
+                Fetch.ResponseOptions
+                Fetch.ResponseType
+                Fetch.Response
                 General.BarProp
                 General.History
                 General.Location
+                General.ErrorEvent
                 General.MessageEvent
                 General.MessagePort
                 General.Navigator
                 General.ScrollRestoration
                 General.UndoManager
+                General.WindowOrWorkerGlobalScope
                 General.Window
                 General.CSSSD
                 General.MQL
@@ -2304,6 +2758,17 @@ module Definition =
                 WebSockets.ReadyState
                 WebStorage.Storage
                 WebStorage.StorageEvent
+                WebWorkers.WorkerType
+                WebWorkers.WorkerOptions
+                WebWorkers.WorkerNavigator
+                WebWorkers.WorkerUtils
+                WebWorkers.WorkerLocation
+                WebWorkers.WorkerGlobalScope
+                WebWorkers.DedicatedWorkerGlobalScope
+                WebWorkers.SharedWorkerGlobalScope
+                WebWorkers.AbstractWorker
+                WebWorkers.Worker
+                WebWorkers.SharedWorker
             ]
             Namespace "WebSharper.JavaScript.Geolocation" [
                 Geolocation.Coordinates

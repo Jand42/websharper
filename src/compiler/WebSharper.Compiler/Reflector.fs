@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -186,6 +186,7 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
 
         let methods = Dictionary()
         let constructors = Dictionary()
+        let abstractAndVirtualMethods = ResizeArray()
         let mutable hasInstanceMethod = false
          
         for meth in typ.Methods do
@@ -217,7 +218,7 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
                         Some (Id.New "this")    
                     else 
                         None
-                let parsed = inlAttr |> Option.map (WebSharper.Compiler.Recognize.createInline emptyMutableExternals thisArg vars opts.IsPure) 
+                let parsed = inlAttr |> Option.map (WebSharper.Compiler.Recognize.createInline emptyMutableExternals thisArg vars opts.IsPure [||])
 
                 let kindWithoutMacros =
                     if inlAttr.IsSome then Some Inline else 
@@ -230,7 +231,7 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
                         |> List.foldBack (fun (m, p) x -> Some (Macro(m, p, x))) macros 
                     |> Option.get
 
-                let body = match parsed with | Some b -> b | _ -> Undefined
+                let body = match parsed with | Some b -> b.Expr | _ -> Undefined
 
                 let tgen = if typ.HasGenericParameters then typ.GenericParameters.Count else 0
                 if meth.IsConstructor then 
@@ -263,12 +264,33 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
                     
                     if not meth.IsStatic then hasInstanceMethod <- true
 
+                    if meth.IsAbstract then
+                        // Abstract method
+                        let aNode = graph.AddOrLookupNode(AbstractMethodNode(def, mdef))
+                        graph.AddEdge(mNode, aNode)
+                        abstractAndVirtualMethods.Add(aNode) |> ignore
+                    elif meth.IsVirtual then
+                        let bdef =
+                            if meth.HasOverrides then
+                                // Override
+                                getTypeDefinition meth.Overrides.[0].DeclaringType // why are there several Overrides?
+                            else
+                                // Virtual method
+                                def
+                        let aNode = graph.AddOrLookupNode(AbstractMethodNode(def, mdef))
+                        graph.AddEdge(mNode, aNode)
+                        graph.AddOverride(def, bdef, mdef)
+                        abstractAndVirtualMethods.Add(aNode) |> ignore
+
                     try methods.Add(mdef, (kind, opts, body))
                     with _ ->
                         failwithf "Duplicate definition for method of %s: %s" def.Value.FullName (string mdef.Value)
-        
-        if constructors.Count = 0 && methods.Count = 0 then () else
-                           
+
+        // Reflector is used for WIG, where abstract/virtual methods are generally meant to be called externally,
+        // so any override of them should never be DCE'd. This enforces it.
+        for aNode in abstractAndVirtualMethods do
+            graph.AddEdge(clsNodeIndex, aNode)
+
         classes.Add(def, 
             {
                 Address = prototypes.TryFind(def.Value.FullName) |> Option.map (fun s -> s.Split('.') |> List.ofArray |> List.rev |> Address)
@@ -334,10 +356,10 @@ let trAsm (prototypes: IDictionary<string, string>) (assembly : Mono.Cecil.Assem
         Interfaces = interfaces
         Classes = classes
         CustomTypes = Map.empty
-        EntryPoint = None
         MacroEntries = Map.empty
         Quotations = Map.empty
         ResourceHashes = Dictionary()
+        ExtraBundles = Set.empty
     }
 
 let TransformAssembly prototypes assembly =

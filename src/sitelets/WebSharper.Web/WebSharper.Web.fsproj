@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
     <WebSharperProject>Library</WebSharperProject>
+    <WebSharperUseNetFxCompiler>True</WebSharperUseNetFxCompiler>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
@@ -9,7 +11,7 @@
     <Compile Include="UserSession.fs" />
     <Compile Include="Context.fs" />
     <Compile Include="ClientSideJson.fs" />
-    <Compile Include="TypedJson.fs" />
+    <Compile Include="TypedJsonProxy.fs" />
     <Compile Include="Shared.fs" />
     <Compile Include="ResourceContext.fs" />
     <Compile Include="RpcModule.fs" />

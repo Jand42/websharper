@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -30,10 +30,10 @@ type Assembly =
     member GetWebResources : unit -> seq<string * string>
 
     /// Returns the raw assembly data.
-    member RawBytes : option<StrongNameKeyPair> -> byte []
+    member RawBytes : option<byte[]> -> byte[]
 
     /// Writes the assembly to the given path.
-    member Write : option<StrongNameKeyPair> -> path: string -> unit
+    member Write : option<byte[]> -> path: string -> unit
 
     /// Reads the embedded JavaScript.
     member CompressedJavaScript : option<string>
@@ -61,6 +61,9 @@ type Assembly =
 
     /// The TypeScript `.d.ts` declarations for the JavaScript.
     member TypeScriptDeclarations : option<string>
+
+    /// True if the assembly contains the `WebSharper.meta` embedded resource.
+    member HasWebSharperMetadata : bool
 
     static member internal Create :
         def: Mono.Cecil.AssemblyDefinition

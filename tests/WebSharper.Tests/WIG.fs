@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -50,6 +50,38 @@ type StubTestClassNamed =
     new () = {}
     member this.GetX() = X<int>
     static member Static() = X<int>
+
+[<Stub>]
+module StubModule =
+    let Function_add1 (x: int) = X<int>
+    let UnitFunction_returns2 () = X<int>
+    let Value_equals15 = X<int>
+
+[<Stub; Name "StubModule.Nested">]
+module NamedStubModule =
+    let Function_add20 (x: int) = X<int>
+    let UnitFunction_returns54 () = X<int>
+    let Value_equals28 = X<int>
+
+[<JavaScript>]
+type InheritAbsCls1() =
+    inherit AbsCls("InheritAbsCls1")
+    override this.AbsMeth() = "overridden abstract method from InheritAbsCls1"
+    override this.VirtMeth() = "overridden virtual method from InheritAbsCls1"
+
+[<JavaScript>]
+type InheritAbsCls2() =
+    inherit AbsCls("InheritAbsCls2")
+    override this.AbsMeth() = "overridden abstract method from InheritAbsCls2"
+
+[<JavaScript>]
+type InheritConcCls1() =
+    inherit ConcCls("InheritConcCls1")
+    override this.VirtMeth() = "overridden virtual method from InheritConcCls1"
+
+[<JavaScript>]
+type InheritConcCls2() =
+    inherit ConcCls("InheritConcCls2")
 
 [<JavaScript>]
 let Tests =
@@ -250,5 +282,50 @@ let Tests =
             equal (s.GetX()) 3
             equal (s.GetY()) 3
             equal (StubTestClassNamed.Static()) 4
+        }
+
+        Test "Abstract class" {
+            let x1 = InheritAbsCls1()
+            equal (x1.AbsMeth()) "overridden abstract method from InheritAbsCls1"
+            equal (x1.VirtMeth()) "overridden virtual method from InheritAbsCls1"
+            equal (x1.ConcMeth()) "concrete method from InheritAbsCls1"
+
+            let x2 = InheritAbsCls2()
+            equal (x2.AbsMeth()) "overridden abstract method from InheritAbsCls2"
+            equal (x2.VirtMeth()) "base virtual method from InheritAbsCls2"
+            equal (x2.ConcMeth()) "concrete method from InheritAbsCls2"
+
+            let x3 = OverridingCls()
+            equal (x3.AbsMeth()) "overridden abstract method from OverridingCls"
+            equal (x3.VirtMeth()) "overridden virtual method from OverridingCls"
+            equal (x3.ConcMeth()) "concrete method from OverridingCls"
+
+            let x4 = NonOverridingCls()
+            equal (x4.AbsMeth()) "overridden abstract method from NonOverridingCls"
+            equal (x4.VirtMeth()) "base virtual method from NonOverridingCls"
+            equal (x4.ConcMeth()) "concrete method from NonOverridingCls"
+        }
+
+        Test "Concrete class with virtual method" {
+            let x1 = InheritConcCls1()
+            equal (x1.VirtMeth()) "overridden virtual method from InheritConcCls1"
+            equal (x1.ConcMeth()) "concrete method from InheritConcCls1"
+
+            let x2 = InheritConcCls2()
+            equal (x2.VirtMeth()) "base virtual method from InheritConcCls2"
+            equal (x2.ConcMeth()) "concrete method from InheritConcCls2"
+
+            let x3 = ConcCls("ConcCls")
+            equal (x3.VirtMeth()) "base virtual method from ConcCls"
+            equal (x3.ConcMeth()) "concrete method from ConcCls"
+        }
+
+        Test "Stub module" {
+            equal (StubModule.Function_add1 100) 101
+            equal (StubModule.UnitFunction_returns2 ()) 2
+            equal StubModule.Value_equals15 15
+            equal (NamedStubModule.Function_add20 33) 53
+            equal (NamedStubModule.UnitFunction_returns54 ()) 54
+            equal NamedStubModule.Value_equals28 28
         }
     }

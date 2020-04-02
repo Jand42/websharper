@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -619,8 +619,6 @@ let Tests =
             equal (filterWithSeqConstraint f [ 1; 2; 3; 10; 4; 5; 6; 7 ] |> Seq.toArray) [| 1 .. 5 |]        
         }       
 
-    #if FSHARP40
-
         Test "Seq.contains" {
             isTrue (Seq.contains 0 { 0 .. 4 })
             isFalse (Seq.contains 5 { 0 .. 4 })
@@ -630,11 +628,27 @@ let Tests =
             equal (Seq.chunkBySize 4 { 1 .. 8 } |> Array.ofSeq) [| [| 1 .. 4 |]; [| 5 .. 8 |] |] 
             equal (Seq.chunkBySize 4 { 1 .. 10 } |> Array.ofSeq) [| [| 1 .. 4 |]; [| 5 .. 8 |]; [| 9; 10 |] |]
             raises (Seq.chunkBySize 0 { 1 .. 2 })
+
+            let s = seq { 
+                yield! { 1 .. 2 }
+                yield 3
+            }
+            equal (Seq.chunkBySize 10 s |> Array.ofSeq) [| [| 1 .. 3 |] |] 
         }
 
         Test "Seq.splitInto" {
             equal (Seq.splitInto 2 Seq.empty<int> |> Array.ofSeq) [||]
             raises (Seq.splitInto 0 Seq.empty<int> |> ignore)
+        }
+
+        Test "Seq.exactlyOne" {
+            equal (Seq.exactlyOne [ 0 ]) 0
+            raises (Seq.exactlyOne [ 0; 1 ])
+        }
+
+        Test "Seq.tryExactlyOne" {
+            equal (Seq.tryExactlyOne [ 0 ]) (Some 0)
+            equal (Seq.tryExactlyOne [ 0; 1 ]) None
         }
 
         Test "Seq.except" {
@@ -787,7 +801,5 @@ let Tests =
                 isTrueMsg (s |> Seq.pairwise |> Seq.forall (fun (x, y) -> cmp x y <= 0)) "Result is sorted"
             })
         }
-
-        #endif
     
     }

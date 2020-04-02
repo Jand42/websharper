@@ -24,20 +24,8 @@ open WebSharper
 open WebSharper.Collections.Tests.SplitProxy
 open WebSharper.JavaScript
 open WebSharper.Testing
+
 module R = WebSharper.Testing.RandomValues
-
-[<Proxy(typeof<System.Text.StringBuilder>)>]
-type internal StringBuilderProxy [<JavaScript>] () =
-    let mutable c = ""
-
-    [<JavaScript>]
-    [<Name "append">]
-    member this.Append(s: string) =
-        c <- c + s
-        As<System.Text.StringBuilder> this
-
-    [<JavaScript>]
-    override this.ToString() = c
 
 [<JavaScript false>]
 type IIsClient =

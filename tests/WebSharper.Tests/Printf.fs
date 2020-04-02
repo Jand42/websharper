@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -48,10 +48,10 @@ type Foo =
     | [<Constant "A">] A
     | [<Constant "B">] B
 
-//[<Direct "var orig = console.log; console.log = function (){window.lastLogged = arguments; orig.apply(console, arguments)}">]
+//[<Direct "var orig = console.log; console.log = function (){$global.lastLogged = arguments; orig.apply(console, arguments)}">]
 //let WatchConsole () = ()
 //
-//[<Inline "window.lastLogged">]
+//[<Inline "$global.lastLogged">]
 //let GetLastLogged() = X
 
 [<JavaScript>]

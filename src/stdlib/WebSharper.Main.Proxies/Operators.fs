@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -151,6 +151,7 @@ let ( ~- ) (x: 'T) = X<'T>
 [<Inline "~ $x">]
 let ( ~~~ ) (x: 'T) = X<'T>
 
+[<Macro(typeof<M.Abs>)>]
 [<Inline "Math.abs($x)">]
 let Abs (x: 'T) = X<'T>
 
@@ -175,6 +176,12 @@ let Ceiling (x: 'T) = X<'T>
 [<Macro(typeof<M.Char>)>]
 let ToChar (x: 'T) = X<char>
 
+[<Macro(typeof<M.Conversion>)>]
+let ToByte (x: 'T) = X<byte>
+
+[<Macro(typeof<M.Conversion>)>]
+let ToSByte (x: 'T) = X<sbyte>
+
 [<Inline>]
 let Compare<'T> (a: 'T) (b: 'T) = Unchecked.compare a b
 
@@ -193,8 +200,17 @@ let DefaultArg x d =
     | Some x -> x
     | None   -> d
 
+[<Inline>]
+let DefaultValueArg x d =
+    match x with
+    | ValueSome x -> x
+    | ValueNone   -> d
+
 [<Inline "$x">]
 let Enum<'T when 'T : enum<int>> (x: 'T) = X<'T>
+
+[<Macro(typeof<M.Conversion>)>]
+let ToDecimal (x: 'T) = X<decimal>
 
 [<Macro(typeof<M.Conversion>)>]
 let ToDouble (x: 'T) = X<double>
@@ -232,8 +248,14 @@ let InvalidOp (msg: string) : 'T = raise (System.InvalidOperationException(msg))
 
 let InvalidArg (arg: string) (msg: string) : 'T = raise (System.ArgumentException(arg, msg))
 
+[<Inline>]
+let Lock (o: 'TLock) (act: unit -> 'T) = act()
+
 [<Macro(typeof<M.Conversion>)>]
 let ToInt (x: 'T) = X<int>
+
+[<Macro(typeof<M.Conversion>)>]
+let ToInt16 (x: 'T) = X<int16>
 
 [<Macro(typeof<M.Conversion>)>]
 let ToSingle (x: 'T) = X<single>
@@ -241,11 +263,27 @@ let ToSingle (x: 'T) = X<single>
 [<Macro(typeof<M.Conversion>)>]
 let ToInt32 (x: 'T) = X<int32>
 
+let toUInt (x: float) : int =
+    (if x < 0. then Math.Ceil(x) else Math.Floor(x)) >>>. 0 |> As<int>
+
+let toInt (x: float) : int =
+    let u = toUInt x
+    if u >= As<int> 2147483648L then u - As<int> 4294967296L else u
+
 [<Inline "$x">]
 let ToEnum<'T> (x: int) = X<'T>
 
 [<Macro(typeof<M.Conversion>)>]
 let ToInt64 (x: 'T) = X<int64>
+
+[<Macro(typeof<M.Conversion>)>]
+let ToUInt16 (x: 'T) = X<uint16>
+
+[<Macro(typeof<M.Conversion>)>]
+let ToUInt32 (x: 'T) = X<uint32>
+
+[<Macro(typeof<M.Conversion>)>]
+let ToUInt64 (x: 'T) = X<uint64>
 
 [<Inline "Math.log($x)">]
 let Log (x: 'T) = X<'T>
@@ -298,6 +336,7 @@ let Round (x: 'T) = X<'T>
 [<Inline "$x">]
 let CreateSequence (x: seq<'T>) = X<seq<'T>>
 
+[<Macro(typeof<M.Sign>); JavaScript>]
 let Sign<'T> (x: 'T) =
     match As<int> x with
     | 0            -> 0

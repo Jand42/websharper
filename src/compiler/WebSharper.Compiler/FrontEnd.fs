@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -114,10 +114,10 @@ let TransformMetaSources assemblyName (current: M.Info) sourceMap =
     else
         removeSourcePositionFromMetadata current, [||]
 
-let CreateBundleJSOutput refMeta current =
+let CreateBundleJSOutput refMeta current entryPoint =
 
     let pkg = 
-        Packager.packageAssembly refMeta current true
+        Packager.packageAssembly refMeta current entryPoint Packager.EntryPointStyle.OnLoadIfExists
 
     if pkg = AST.Undefined then None else
 
@@ -138,7 +138,7 @@ let CreateResources (comp: Compilation option) (refMeta: M.Info) (current: M.Inf
     TimedStage "Source position transformations"
 
     let pkg = 
-        Packager.packageAssembly refMeta current false
+        Packager.packageAssembly refMeta current (comp |> Option.bind (fun c -> c.EntryPoint)) Packager.EntryPointStyle.OnLoadIfExists
 
     TimedStage "Packaging assembly"
     
@@ -270,9 +270,12 @@ type ResourceContext =
 
         /// Decides how to render a resource.
         RenderResource : ResourceContent -> Resources.Rendering
+
+        /// Base URL path for WebSharper scripts.
+        ScriptBaseUrl : option<string>
     }
 
-let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf, selfJS, deps: Resources.IResource list, lookupAssemblyCode) =
+let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf, selfJS, deps: Resources.IResource list, lookupAssemblyCode, scriptBaseUrl) =
     let pU = WebSharper.PathConventions.PathUtility.VirtualPaths("/")
     let cache = Dictionary()
     let getRendering (content: ResourceContent) =
@@ -296,6 +299,7 @@ let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf,
         {
             DebuggingEnabled = ctx.DebuggingEnabled
             DefaultToHttp = ctx.DefaultToHttp
+            ScriptBaseUrl = ctx.ScriptBaseUrl
             GetAssemblyRendering = fun name ->
                 if name = nameOfSelf then
                     selfJS
@@ -318,4 +322,27 @@ let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf,
         }
     for d in deps do
         d.Render ctx (fun _ -> writer)
-    Utility.WriteStartCode true writer
+    Resources.HtmlTextWriter.WriteStartCode(writer, scriptBaseUrl)
+
+/// In BundleOnly mode, output a dummy DLL to please MSBuild
+let MakeDummyDll (path: string) (assemblyName: string) =
+    let aND = Mono.Cecil.AssemblyNameDefinition(assemblyName, System.Version())
+    let asm = Mono.Cecil.AssemblyDefinition.CreateAssembly(aND, assemblyName, Mono.Cecil.ModuleKind.Dll)
+    asm.Write(path)
+
+/// For Proxy project type, erase all IL assembly contents except System.Reflection attributes
+let EraseAssemblyContents (assembly : Assembly) =
+    let asm = assembly.Raw
+    let attrs = asm.CustomAttributes.ToArray()
+    asm.CustomAttributes.Clear()
+    asm.EntryPoint <- null
+    asm.Modules.Clear()
+    asm.MainModule.Resources.Clear()
+    asm.MainModule.Types.Clear()
+    for a in attrs do
+        match a.AttributeType.Namespace with
+        | "System.Reflection"
+        | "System.Runtime.Versioning" ->
+            asm.CustomAttributes.Add(a)
+        | _ ->
+            ()

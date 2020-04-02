@@ -249,8 +249,9 @@ module Server =
 
     [<Remote>]
     let GetLoggedInUser () =
-        let ctx = Web.Remoting.GetContext()
         async {
+            do! Async.SwitchToNewThread() // test AsyncLocal behavior
+            let ctx = Web.Remoting.GetContext()
             return! ctx.UserSession.GetLoggedInUser()
         }
 
@@ -333,6 +334,12 @@ module Server =
     [<Remote>]
     let f25 () =
         async { return { Types = [| [| "Serializing record with field $TYPES" |] |] } }
+
+    [<Remote>]
+    let f27 (xy: struct (int * int)) =
+        let (struct (x, y)) = xy
+        struct (x + 1, y + 1)
+        |> async.Return
 
     [<Remote>]
     let OptionToNullable (x: int option) =
@@ -596,7 +603,6 @@ module Remoting =
                 equal x.Types [| [| "Serializing record with field $TYPES" |] |]
             }
 
-            // currently failing
             Test "Struct" {
                 let x = Server.Struct(1, "h")
                 let! y = Server.f21 x
@@ -635,6 +641,10 @@ module Remoting =
             Test "Set with non-trivial key type" {
                 equalAsync (Server.add2_aToSet Set.empty) (Set.ofArray [| { a = 2; b = "a" } |])
                 equalAsync (Server.add2_aToSet (Set.ofArray [| { a = 1; b = "a" } |])) (Set.ofArray [| { a = 1; b = "a" } ; { a = 2; b = "a" } |])
+            }
+
+            Test "struct (int * int) -> struct (int * int)" {
+                equalAsync (Server.f27 (struct (27, 37))) (struct (28, 38))
             }
 
             Test "LoginUser()" {

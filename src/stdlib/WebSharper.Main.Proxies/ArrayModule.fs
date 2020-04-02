@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -474,6 +474,12 @@ let Sum (arr: 'T []) : 'T = X<'T>
 [<Name "sumBy">]
 let SumBy (f: 'T -> 'U) (arr: 'T []) : 'U =  X<'U>
 
+[<Name "transpose">]
+let Transpose (x: 'T[] seq) : 'T[][] =
+    match x with
+    | :? System.Array -> ArrayTranspose (As<'T[][]> x)
+    | _ -> ArrayTranspose (Array.ofSeq x)
+
 [<Inline>]
 let ToList arr = List.ofArray arr
 
@@ -701,6 +707,13 @@ let ExactlyOne (ar : 'T []) =
         ar.JS.[0]
     else
         failwith "The input does not have precisely one element."
+
+[<Name "tryExactlyOne">]
+let TryExactlyOne (ar : 'T []) =
+    if Array.length ar = 1 then
+        Some ar.JS.[0]
+    else
+        None
 
 [<Name "unfold">]
 let Unfold<'T, 'S> (f: 'S -> option<'T * 'S>) (s: 'S) : 'T [] =

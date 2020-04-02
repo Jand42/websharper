@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -20,7 +20,7 @@
 
 module internal WebSharper.Compiler.FSharp.CodeReader
 
-open Microsoft.FSharp.Compiler.SourceCodeServices
+open FSharp.Compiler.SourceCodeServices
  
 open WebSharper.Core
 open WebSharper.Core.AST
@@ -44,37 +44,34 @@ module P = BasicPatterns
 let rec getOrigType (t: FSharpType) =
     if t.IsAbbreviation then getOrigType t.AbbreviatedType else t
 
+let isByRefDef (td: FSharpEntity) =
+    // workaround for FCS bug 
+    td.IsByRef || td.CompiledName = "byref`2"
+
 let isUnit (t: FSharpType) =
     let t = getOrigType t
-    if t.IsGenericParameter then
-        false
-    else
-    let t = getOrigType t
-    if t.IsTupleType || t.IsFunctionType then false else
+    if not t.HasTypeDefinition then false else
     let td = t.TypeDefinition
-    if td.IsArrayType || td.IsByRef then false
-#if NET461 // TODO dotnet: erased type providers
+    if td.IsArrayType || isByRefDef td then false
     elif td.IsProvidedAndErased then false
-#endif
     else td.FullName = "Microsoft.FSharp.Core.Unit" || td.FullName = "System.Void"
 
 let isOption (t: FSharpType) =
     let t = getOrigType t
     t.HasTypeDefinition &&
         let td = t.TypeDefinition
-#if NET461 // TODO dotnet: erased type providers
         not td.IsProvidedAndErased &&
-#endif
-        td.TryFullName = Some "Microsoft.FSharp.Core.FSharpOption`1"
+        match td.TryFullName with
+        | Some "Microsoft.FSharp.Core.FSharpOption`1"
+        | Some "Microsoft.FSharp.Core.FSharpValueOption`1" -> true
+        | _ -> false
 
 let rec isSeq (t: FSharpType) = 
     let t = getOrigType t
     (
         t.HasTypeDefinition &&
             let td = t.TypeDefinition
-#if NET461 // TODO dotnet: erased type providers
             not td.IsProvidedAndErased &&
-#endif
             td.TryFullName = Some "System.Collections.Generic.IEnumerable`1"
     ) || (
         t.IsGenericParameter && 
@@ -88,7 +85,7 @@ let isByRef (t: FSharpType) =
         false
     else
     if t.IsTupleType || t.IsFunctionType then false else
-    t.HasTypeDefinition && t.TypeDefinition.IsByRef
+    t.HasTypeDefinition && isByRefDef t.TypeDefinition
 
 let getFuncArg t =
     let rec get acc (t: FSharpType) =
@@ -121,7 +118,7 @@ let hasCompilationRepresentation (cr: CompilationRepresentationFlags) attrs =
         && obj.Equals(snd a.ConstructorArguments.[0], int cr)
     )
 
-let getRange (range: Microsoft.FSharp.Compiler.Range.range) =
+let getRange (range: FSharp.Compiler.Range.range) =
     {   
         FileName = range.FileName
         Start = range.StartLine, range.StartColumn + 1
@@ -139,17 +136,12 @@ let getDeclaringEntity (x : FSharpMemberOrFunctionOrValue) =
     | Some e -> e
     | None -> failwithf "Enclosing entity not found for %s" x.FullName
                                 
-type FixCtorTransformer(?thisExpr) =
+type FixCtorTransformer(typ, btyp, ?thisExpr) =
     inherit Transformer()
 
-    let mutable firstOcc = true
+    let mutable addedBaseCtor = false
 
     let thisExpr = defaultArg thisExpr This
-
-    override this.TransformSequential (es) =
-        match es with
-        | h :: t -> Sequential (this.TransformExpression h :: t)
-        | _ -> Undefined
 
     override this.TransformLet(a, b, c) =
         Let(a, b, this.TransformExpression c)
@@ -163,24 +155,42 @@ type FixCtorTransformer(?thisExpr) =
     override this.TransformStatementExpr(a, b) = StatementExpr (a, b)
 
     override this.TransformCtor (t, c, a) =
-        if not firstOcc then Ctor (t, c, a) else
-        firstOcc <- false
-        if t.Entity = Definitions.Obj then thisExpr
-        elif (let fn = t.Entity.Value.FullName in fn = "WebSharper.ExceptionProxy" || fn = "System.Exception") then 
-            match a with
-            | [] -> Undefined
-            | [msg] -> ItemSet(thisExpr, Value (String "message"), msg)
-            | [msg; inner] -> 
+        if addedBaseCtor then Ctor (t, c, a) else
+        addedBaseCtor <- true
+        let isBase = t.Entity <> typ
+        let tn = typ.Value.FullName
+        if (not isBase || Option.isSome btyp) && not (tn = "System.Object" || tn = "System.Exception") then
+            if t.Entity.Value.FullName = "System.Exception" then 
+                let msg, inner =
+                    match a with
+                    | [] -> None, None
+                    | [msg] -> Some msg, None
+                    | [msg; inner] -> Some msg, Some inner 
+                    | _ -> failwith "Too many arguments for Error constructor"
                 Sequential [
-                    ItemSet(thisExpr, Value (String "message"), msg)
-                    ItemSet(thisExpr, Value (String "inner"), inner)
+                    match msg with
+                    | Some m ->
+                        yield ItemSet(thisExpr, Value (String "message"), m)
+                    | None -> ()
+                    match inner with
+                    | Some i ->
+                        yield ItemSet(thisExpr, Value (String "inner"), i)
+                    | None -> ()
+                    yield CompilationHelpers.restorePrototype
                 ]
-            | _ -> failwith "Too many arguments for Error"
-        else
-            BaseCtor(thisExpr, t, c, a) 
+            else
+                BaseCtor(thisExpr, t, c, a) 
+        else thisExpr
 
-let fixCtor expr =
-    FixCtorTransformer().TransformExpression(expr)
+    member this.Fix(expr) = 
+        let res = this.TransformExpression(expr)
+        match btyp with
+        | Some b when not addedBaseCtor -> 
+            Sequential [ BaseCtor(thisExpr, NonGeneric b, ConstructorInfo.Default(), []); res ]
+        | _ -> res
+
+let fixCtor thisTyp baseTyp expr =
+    FixCtorTransformer(thisTyp, baseTyp).Fix(expr)
 
 module Definitions =
     let List =
@@ -297,7 +307,8 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
             override this.GetAssemblyName attr =
                 readSimpleName attr.AttributeType.Assembly (attr.AttributeType.QualifiedName.Split([|','|]).[0])
             override this.GetName attr = attr.AttributeType.LogicalName
-            override this.GetCtorArgs attr = attr.ConstructorArguments |> Seq.map snd |> Array.ofSeq          
+            override this.GetCtorArgs attr = attr.ConstructorArguments |> Seq.map snd |> Array.ofSeq
+            override this.GetNamedArgs attr = attr.NamedArguments |> Seq.map (fun (_, n, _, v) -> n, v) |> Array.ofSeq
             override this.GetTypeDef o = (self.ReadType Map.empty (o :?> FSharpType) : Type).TypeDefinition
         }
 
@@ -310,13 +321,11 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
         else
         let td = getOrigDef td
         let fullName =
-#if NET461 // TODO dotnet: erased type providers
             if td.IsProvidedAndErased then td.LogicalName else
-#endif
             td.QualifiedName.Split([|','|]).[0] 
         let res =
             {
-                Assembly = readSimpleName td.Assembly fullName
+                Assembly = comp.FindProxiedAssembly(readSimpleName td.Assembly fullName)
                 FullName = fullName
             }
         // TODO: more measure types
@@ -371,6 +380,21 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
             getTupleType false
         elif t.IsFunctionType then
             getFunc()
+        elif t.IsAnonRecordType then
+            let d = t.AnonRecordTypeDetails
+            let cname = d.CompiledName
+            let def =
+                TypeDefinition {
+                    Assembly = comp.FindProxiedAssembly(readSimpleName t.AnonRecordTypeDetails.Assembly cname)
+                    FullName = cname
+                }
+            if not (comp.HasCustomTypeInfo def) then
+                let info =
+                    d.SortedFieldNames
+                    |> List.ofArray
+                    |> M.FSharpAnonRecordInfo
+                comp.AddCustomType(def, info)
+            GenericType def (t.GenericArguments |> Seq.map (this.ReadTypeSt markStaticTP tparams) |> List.ofSeq)
         else
         // measure type parameters do not have a TypeDefinition
         // reusing LocalTypeParameter case as it is also fully erased
@@ -378,14 +402,14 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
         let td = t.TypeDefinition
         if td.IsArrayType then
             ArrayType(this.ReadTypeSt markStaticTP tparams t.GenericArguments.[0], td.ArrayRank)
-        elif td.IsByRef then
+        elif isByRefDef td then
             ByRefType(this.ReadTypeSt markStaticTP tparams t.GenericArguments.[0])
         else
             let fn = 
-#if NET461 // TODO dotnet: erased type providers
                 if td.IsProvidedAndErased then td.LogicalName else
-#endif
-                td.FullName
+                try
+                    td.FullName
+                with _ -> failwithf "No FullName: LogicalName '%s', CompiledName '%s'" td.LogicalName td.CompiledName 
             if fn.StartsWith "System.Tuple" then
                 getTupleType false
             elif fn.StartsWith "System.ValueTuple" then
@@ -483,6 +507,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
                         Generics   = tparams.Count - (getDeclaringEntity x).GenericParameters.Count
                     } 
                 )
+        |> comp.ResolveProxySignature
 
     member this.ReadAndRegisterTypeDefinition (comp: Compilation) (td: FSharpEntity) =
         let res = this.ReadTypeDefinition td
@@ -587,7 +612,7 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
                 | FuncArg -> Var v
                 | ByRefArg -> 
                     let t = getOrigType expr.Type
-                    if t.HasTypeDefinition && t.TypeDefinition.IsByRef then Var v else GetRef (Var v)
+                    if t.HasTypeDefinition && isByRefDef t.TypeDefinition then Var v else GetRef (Var v)
                 | ThisArg -> This
         | P.Lambda _ ->
             let rec loop acc = function
@@ -867,6 +892,12 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
                         for a, f in Seq.zip items fields ->
                             FieldSet(Some This, t, f.Name, tr a)
                     ]
+        | P.NewAnonRecord (typ, items) ->
+            let t =
+                match sr.ReadType env.TParams typ with
+                | ConcreteType ct -> ct
+                | _ -> parsefailf "Expected a named type"
+            NewRecord (t, List.map tr items)
         | P.DecisionTree (matchValue, cases) ->
             let trMatchVal = transformExpression env matchValue
             let simpleMatchCases = System.Collections.Generic.Dictionary()
@@ -983,10 +1014,18 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
                 | ConcreteType ct -> ct
                 | _ -> parsefailf "Expected a named type in ILFieldSet"
             FieldSet(thisOpt |> Option.map tr, t, field, tr value)
+        | P.AnonRecordGet (expr, typ, index) ->
+            let t =
+                match sr.ReadType env.TParams typ with
+                | ConcreteType ct -> ct
+                | _ -> parsefailf "Expected a named type"
+            FieldGet (Some (tr expr), t, typ.AnonRecordTypeDetails.SortedFieldNames.[index])
         | P.AddressOf expr ->
             let isStructUnionOrTupleGet =
                 let t = getOrigType expr.Type
-                t.IsStructTupleType || (
+                t.IsStructTupleType 
+                || t.IsAnonRecordType
+                || (
                     t.HasTypeDefinition && (
                         let td = t.TypeDefinition
                         td.IsFSharpUnion && td.IsValueType
@@ -1057,9 +1096,11 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
                         yield Var o
                     ]
                 )
-            Let(r, CopyCtor(sr.ReadAndRegisterTypeDefinition env.Compilation typ.TypeDefinition, plainObj),
+            let td = sr.ReadAndRegisterTypeDefinition env.Compilation typ.TypeDefinition
+            let baseTyp = typ.TypeDefinition.BaseType |> Option.map (fun t -> sr.ReadAndRegisterTypeDefinition env.Compilation t.TypeDefinition) 
+            Let(r, CopyCtor(td, plainObj),
                 Sequential [
-                    yield FixCtorTransformer(Var r).TransformExpression(tr expr)
+                    yield FixCtorTransformer(td, baseTyp, Var r).TransformExpression(tr expr)
                     yield Var r
                 ]
             )
@@ -1091,7 +1132,11 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
             tr expr
         | P.Quote expr -> tr expr
         | P.BaseValue _ -> Base
-        | P.ILAsm("[I_ldelema (NormalAddress,false,ILArrayShape [(Some 0, None)],TypeVar 0us)]", _, [ arr; i ]) ->
+        | P.ILAsm
+            (
+                ("[I_ldelema (NormalAddress,false,ILArrayShape [(Some 0, None)],TypeVar 0us)]" 
+                    | "[I_ldelema (NormalAddress,false,ILArrayShape [(Some 0, None)],!0)]"), _, [ arr; i ]
+            ) ->
             let arrId = newId()
             let iId = newId()
             Let (arrId, tr arr, Let(iId, tr i, MakeRef (ItemGet(Var arrId, Var iId, NoSideEffect)) (fun value -> ItemSet(Var arrId, Var iId, value))))
@@ -1103,7 +1148,7 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
             Call(Some (tr arr), NonGeneric Definitions.Array, NonGeneric Definitions.ArrayLength, [])
         | P.ILAsm (s, _, _) ->
             parsefailf "Unrecognized ILAsm: %s" s
-        | P.TraitCall(sourceTypes, traitName, memberFlags, typeArgs, typeInstantiation, argExprs) ->
+        | P.TraitCall(sourceTypes, traitName, memberFlags, _, _, argExprs) ->
             let isInstance = memberFlags.IsInstance
             let meth =
                 Method {
@@ -1113,7 +1158,7 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
                     Generics   = 0
                 } 
             let s = sourceTypes |> Seq.map (sr.ReadType env.TParams) |> List.ofSeq
-            let m = Generic meth (typeInstantiation @ typeArgs |> List.map (sr.ReadType env.TParams))
+            let m = NonGeneric meth
             if isInstance then 
                 match argExprs |> List.map tr with
                 | t :: a ->
@@ -1134,7 +1179,7 @@ let rec transformExpression (env: Environment) (expr: FSharpExpr) =
         errorPlaceholder        
     |> withSourcePos expr
 
-type Microsoft.FSharp.Compiler.Range.range with
+type FSharp.Compiler.Range.range with
     member this.AsSourcePos =
         {
             FileName = System.IO.Path.GetFileName(this.FileName)
@@ -1162,16 +1207,19 @@ let scanExpression (env: Environment) (containingMethodName: string) (expr: FSha
                 | Member.Method(_, m) ->
                     match env.Compilation.TryLookupQuotedArgMethod(typ, m) with
                     | Some x ->
+                        Option.iter scan this
                         x |> Array.iter (fun i ->
                             let arg = arguments.[i]
-                            match arg with
-                            | P.Quote e -> Some e
-                            | P.Value v ->
-                                match vars.TryGetValue v with
-                                | true, e -> Some e
-                                | false, _ -> None
-                            | _ -> None
-                            |> Option.iter (fun e ->
+                            let e =
+                                match arg with
+                                | P.Quote e -> Some e
+                                | P.Value v ->
+                                    match vars.TryGetValue v with
+                                    | true, e -> Some e
+                                    | false, _ -> None
+                                | _ -> None
+                            match e with
+                            | Some e ->
                                 let pos = e.Range.AsSourcePos
                                 let e = transformExpression env e
                                 let argTypes = [ for (v, _, _) in env.FreeVars -> env.SymbolReader.ReadType Map.empty v.FullType ]
@@ -1196,7 +1244,7 @@ let scanExpression (env: Environment) (containingMethodName: string) (expr: FSha
                                     | _ -> false
                                 if not isTrivial then
                                     quotations.Add(pos, qm, argNames, f) 
-                            )
+                            | None -> scan arg
                         )
                     | _ -> default'()
                 | _ -> default'()

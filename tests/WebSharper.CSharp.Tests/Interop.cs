@@ -1,4 +1,23 @@
-﻿using System;
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you
+// may not use this file except in compliance with the License.  You may
+// obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.  See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// $end{copyright}
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -286,6 +305,13 @@ namespace WebSharper.CSharp.Tests
             Equal(f(3), 3);
             Equal(I.Module.InvokeFunc(FSharpConvert.Fun((int x) => x + 1), 1), 2);
             Equal(I.Module.InvokeFunc2(FSharpConvert.Fun((int x, int y) => x + y), 1, 2), 3);
+            Equal(I.Module.InvokeFunc(FuncConvert.FromFunc((int x) => x + 1), 1), 2);
+            Equal(I.Module.InvokeFunc2(FuncConvert.FromFunc((int x, int y) => x + y), 1, 2), 3);
+            Equal(I.Module.InvokeFunc(FuncConvert.ToFSharpFunc((int x) => x + 1), 1), 2);
+            var c = FSharpFunc<int, int>.ToConverter(I.Module.ReturnsFunc());
+            Equal(c(3), 3);
+            var f2 = FSharpFunc<int, int>.FromConverter(c);
+            Equal(f2.Invoke(3), 3);
         }
 
         [Test]
@@ -344,5 +370,32 @@ namespace WebSharper.CSharp.Tests
             o["background-color"] = "#777";
             Equal(o["background-color"], "#777");
         }
+
+        public class TestDelegateThisScoping
+        {
+            int X;
+
+            public TestDelegateThisScoping(int x) { X = x; }
+
+            int Add(int y, int z) => X + y + z;
+
+            public int AddWithFSharpFunc(int y, int z) => I.Module.InvokeFunc2(FSharpConvert.Fun<int, int, int>(Add), y, z);
+        }
+
+        [Test]
+        public void DelegateThisScoping()
+        {
+            var o = new TestDelegateThisScoping(1);
+            Equal(o.AddWithFSharpFunc(2, 3), 6);
+        }
+
+        [Test]
+        public void FSharpAnonRecord()
+        {   
+            Equal(I.Module.AnonRecordNested().A, 1);
+            Equal(I.Module.AnonRecordNested().B.A, 2);
+            Equal(I.Module.AnonRecordNested().B.B, "hi");
+        }
+
     }
 }

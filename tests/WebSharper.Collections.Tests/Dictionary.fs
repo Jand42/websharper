@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -175,6 +175,12 @@ let Tests =
             notEqual b1 b2
             equal (hash b1) (hash b2)
             isFalse (d.ContainsKey b2)
+        }
+
+        Test "Bug #953" {
+            let d = Dictionary<string, string>()
+            d.Add("", "")
+            isTrue (d.ContainsKey "x" = false)
         }
 
     }

@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -151,6 +151,19 @@ module Sitelet =
                             CustomContent (genResp << Context.Map f)
                         | Content.CustomContentAsync genResp ->
                             CustomContentAsync (genResp << Context.Map f)
+                }
+        }
+
+    /// Maps over the served sitelet content.
+    let MapContent (f: Async<Content<'T>> -> Async<Content<'T>>) (sitelet: Sitelet<'T>) : Sitelet<'T> =
+        { sitelet with
+            Controller =
+                { Handle = fun ep ->
+                    ep
+                    |> sitelet.Controller.Handle
+                    |> async.Return
+                    |> f
+                    |> C.FromAsync
                 }
         }
 
@@ -339,10 +352,25 @@ type Sitelet<'T when 'T : equality> with
     member this.Shift (prefix: string) =
         Sitelet.Shift prefix this
 
-[<Extension>]
+[<Extension; Sealed>]
 type SiteletExtensions =
+    [<Extension>]
     static member Unbox<'T when 'T: equality>(sitelet: Sitelet<obj>) =
         Sitelet.Unbox<'T> sitelet
+
+    [<Extension>]
+    static member MapContent (sitelet: Sitelet<obj>, f: Func<Task<CSharpContent>, Task<CSharpContent>>) =
+        { sitelet with
+            Controller =
+                { Handle = fun ep ->
+                    (ep |> sitelet.Controller.Handle
+                        |> CSharpContent.FromContent
+                        |> Task.FromResult
+                        |> f.Invoke
+                        |> CSharpContent.FromTask
+                    ).AsContent
+                }
+        }
 
 type SiteletBuilder() =
 

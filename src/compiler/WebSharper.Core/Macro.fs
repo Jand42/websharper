@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -23,6 +23,7 @@
 namespace WebSharper.Core
 
 open WebSharper.Core.AST
+open System.Collections.Generic
 
 /// Input for a TranslateCall method on a macro
 type MacroCall =
@@ -34,6 +35,7 @@ type MacroCall =
          Parameter: option<obj>
          IsInline: bool
          Compilation: Metadata.ICompilation
+         BoundVars: IReadOnlyDictionary<Id, Expression>
     }
 
 /// Input for a TranslateCtor method on a macro
@@ -45,6 +47,7 @@ type MacroCtor =
          Parameter: option<obj>
          IsInline: bool
          Compilation: Metadata.ICompilation
+         BoundVars: IReadOnlyDictionary<Id, Expression>
     }
 
 /// The return type of macro methods 
@@ -63,6 +66,9 @@ type MacroResult =
     /// Report that the macro needs concrete type information.
     /// Delays compilation of inlined calls until type resolution. 
     | MacroNeedsResolvedTypeArg of Type
+    /// Report that the macro has made use of the expression of an outside let binding
+    /// which now can be removed
+    | MacroUsedBoundVar of Id * MacroResult
 
     static member Map f m =
         match m with
@@ -100,6 +106,11 @@ type Macro() =
 
     abstract Close : Metadata.ICompilation -> unit
     default this.Close _ = ()
+
+    /// Set this to true if compiler must translate the arguments to JavaScript expressions before calling TranslateCall or TranslateCtor.
+    /// Default is false, ie. arguments are .NET expressions.
+    abstract NeedsTranslatedArguments : bool
+    default this.NeedsTranslatedArguments = false
 
 /// The return type of Generate method of a generator 
 type GeneratedMember =

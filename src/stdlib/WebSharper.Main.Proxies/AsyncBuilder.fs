@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -63,7 +63,7 @@ type private AsyncBuilderProxy [<Inline "null">]() =
         As (C.Using (x, As f))
 
     [<Inline>]
-    member this.Zero() : Async<unit> = C.Zero
+    member this.Zero() : Async<unit> = As C.Zero
 
     [<Inline>]
     member this.While(g: unit -> bool, b:Async<unit>) : Async<unit> = 

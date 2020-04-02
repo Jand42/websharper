@@ -11,23 +11,13 @@ dependencies
     WebSharper == CURRENTVERSION
 files
     ../msbuild/WebSharper.FSharp.targets ==> build
-    ../build/Release/FSharp/net461/wsfsc.exe ==> tools
-    ../build/Release/FSharp/net461/wsfsc.exe.config ==> tools
-    ../build/Release/FSharp/net461/WebSharper.Compiler.dll ==> tools
-    ../build/Release/FSharp/net461/WebSharper.Compiler.FSharp.dll ==> tools
-    ../build/Release/FSharp/net461/WebSharper.Sitelets.Offline.dll ==> tools
-    ../build/Release/FSharp/net461/WebSharper.Core.dll ==> tools
-    ../build/Release/FSharp/net461/WebSharper.Core.JavaScript.dll ==> tools
-    ../build/Release/FSharp/net461/WebSharper.InterfaceGenerator.dll ==> tools
-    ../build/Release/FSharp/net461/FSharp.Compiler.Service.dll ==> tools
-    ../build/Release/FSharp/net461/FSharp.Core.dll ==> tools
-    ../build/Release/FSharp/net461/FSharp.Core.sigdata ==> tools
-    ../build/Release/FSharp/net461/FSharp.Core.optdata ==> tools
-    ../build/Release/FSharp/net461/Mono.Cecil.dll ==> tools
-    ../build/Release/FSharp/net461/Mono.Cecil.Mdb.dll ==> tools
-    ../build/Release/FSharp/net461/Mono.Cecil.Pdb.dll ==> tools
-    ../build/Release/FSharp/net461/System.Collections.Immutable.dll ==> tools
-    ../build/Release/FSharp/net461/System.Reflection.Metadata.dll ==> tools
-    ../build/Release/FSharp/net461/System.ValueTuple.dll ==> tools
-    ../build/Release/FSharp/net461/netstandard.dll ==> tools
+    ../build/Release/FSharp/net461/deploy/wsfsc.exe ==> tools/net461
+    ../build/Release/FSharp/net461/deploy/wsfsc.exe.config ==> tools/net461
+    ../build/Release/FSharp/net461/deploy/*.dll ==> tools/net461
+    ../build/Release/FSharp/netcoreapp2.0/deploy/*.dll ==> tools/netstandard2.0
+    ../build/Release/FSharp/netcoreapp2.0/deploy/wsfsc.dll.config ==> tools/netstandard2.0
+    ../build/Release/FSharp/netcoreapp2.0/deploy/wsfsc.cmd ==> tools/netstandard2.0
+    ../build/Release/FSharp/netcoreapp2.0/deploy/wsfsc.sh ==> tools/netstandard2.0
+    ../build/Release/FSharp/netcoreapp2.0/deploy/wsfsc.runtimeconfig.json ==> tools/netstandard2.0
+    ../src/compiler/WebSharper.FSharp/default.win32manifest ==> tools/netstandard2.0
     ../src/compiler/WebSharper.FSharp/runngen.ps1 ==> tools

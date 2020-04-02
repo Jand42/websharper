@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -188,14 +188,26 @@ let Tests =
         Test "Parse" {
             let d = DateTime(2010, 4, 8, 15, 5, 39)
             raises (DateTime.Parse("not a date"))
-            equal (DateTime.Parse("Thu, 08 Apr 2010 13:05:39 GMT")) d
-            equal (Date.Parse("Thu, 08 Apr 2010 13:05:39 GMT")) (As<int> d)
+            equal (DateTime.Parse("Thu, 08 Apr 2010 15:05:39")) d
+            equal (Date.Parse("Thu, 08 Apr 2010 15:05:39")) (As<int> d)
         }
 
         Test "TryParse" {
             let d = DateTime(2010, 4, 8, 15, 5, 39)
             equal (DateTime.TryParse("not a date") |> fst) false
-            equal (DateTime.TryParse("Thu, 08 Apr 2010 13:05:39 GMT")) (true, d)
+            equal (DateTime.TryParse("Thu, 08 Apr 2010 15:05:39")) (true, d)
+        }
+
+        Test "DaysInMonth" {
+            equal (DateTime.DaysInMonth(2018, 6)) 30
+            equal (DateTime.DaysInMonth(2018, 2)) 28
+            equal (DateTime.DaysInMonth(2020, 2)) 29
+        }
+
+        Test "IsLeapYear" {
+            isFalse (DateTime.IsLeapYear 2018)
+            isTrue (DateTime.IsLeapYear 2020)
+            isFalse (DateTime.IsLeapYear 2100)
         }
     }
 

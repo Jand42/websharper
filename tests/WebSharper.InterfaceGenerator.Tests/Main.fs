@@ -1,3 +1,22 @@
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you
+// may not use this file except in compliance with the License.  You may
+// obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.  See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// $end{copyright}
 namespace WebSharper.InterfaceGenerator.Tests
 
 open WebSharper
@@ -137,7 +156,57 @@ module Definition =
             "asLowerCase" =@ !? T<string> |> Indexed Lowercase
                 |> WithInteropGetterInline (fun tr -> sprintf "$this[%s]" (tr "index"))
                 |> WithInteropSetterInline (fun tr -> sprintf "$wsruntime.SetOrDelete($this, %s, %s)" (tr "index") (tr "value"))
-        ] 
+        ]
+
+    let AbsCls =
+        AbstractClass "AbsCls"
+        |+> Static [Constructor T<string>]
+        |+> Instance [
+            "absMeth" => T<unit> ^-> T<string>
+            |> Abstract
+            "virtMeth" => T<unit> ^-> T<string>
+            |> Virtual
+            "concMeth" => T<unit> ^-> T<string>
+        ]
+
+    let OverridingCls =
+        Class "OverridingCls"
+        |=> Inherits AbsCls
+        |+> Static [Constructor T<unit>]
+        |+> Instance [
+            "absMeth" => T<unit> ^-> T<string>
+            |> Override
+            "virtMeth" => T<unit> ^-> T<string>
+            |> Override
+        ]
+
+    let NonOverridingCls =
+        Class "NonOverridingCls"
+        |=> Inherits AbsCls
+        |+> Static [Constructor T<unit>]
+        |+> Instance [
+            "absMeth" => T<unit> ^-> T<string>
+            |> Override
+        ]
+
+    let ConcCls =
+        Class "ConcCls"
+        |+> Static [Constructor T<string>]
+        |+> Instance [
+            "virtMeth" => T<unit> ^-> T<string>
+            |> Virtual
+            "concMeth" => T<unit> ^-> T<string>
+        ]
+
+    module Regression1010 =
+        let A =
+            Class "Regression1010.A"
+
+        let B =
+            Class "Regression1010.B"
+            |=> Inherits A
+            |+> Static [Constructor T<unit>]
+            |+> Instance ["m" => T<unit> ^-> T<int>]
 
     let Assembly =
         let res1 = Resource "WIGTestJs" "WIGtest.js"
@@ -153,8 +222,16 @@ module Definition =
                  ConfigObj
                  OneBasedArr
                  ObjWithOptionalFields
+                 AbsCls
+                 OverridingCls
+                 NonOverridingCls
+                 ConcCls
                  res1 |> AssemblyWide
                  Resource "WIGTestJs2" "WIGtest2.js" |> Requires [ res1 ] |> AssemblyWide
+            ]
+            Namespace "WebSharper.InterfaceGenerator.Tests.Regression1010" [
+                Regression1010.A
+                Regression1010.B
             ]
         ]
 

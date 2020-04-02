@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -100,15 +100,18 @@ module private WebUtils =
             }
         override this.Cookies =
             if isNull cookies then
-                let d = NameValueCollection()
-                match headers |> Seq.tryFind (fun h -> h.Name = "Cookie") with
-                | None -> ()
-                | Some h ->
-                    for s in h.Value.Split([|"; "|], StringSplitOptions.None) do
-                        match s.IndexOf '=' with
-                        | -1 -> failwith "Cookie header syntax invalid"
-                        | i -> d.Add(s.[..i-1], s.[i+1..])
-                cookies <- Http.ParametersFromNameValues d
+                cookies <-
+                    { new Http.ParameterCollection with
+                        member this.Item(name:string) =
+                            match req.Cookies.Get name with
+                            | null -> None
+                            | c -> Some c.Value
+                        member this.ToList() =
+                            [
+                                for k in req.Cookies.AllKeys do
+                                    yield (k, req.Cookies.[k].Value)
+                            ]    
+                    }
             cookies
 
     /// Converts ASP.NET requests to Sitelet requests.
@@ -187,35 +190,54 @@ type HttpModule() =
             |> Option.map (fun action ->
                 HttpHandler(request, action, site, resCtx, appPath, rootFolder)))
 
+    let remap (ctx: HttpContextBase) (h: HttpHandler) =
+        if HttpRuntime.UsingIntegratedPipeline then
+            ctx.RemapHandler(h)
+        else
+            ctx.Handler <- h
+
     do  Context.IsDebug <- fun () -> HttpContext.Current.IsDebuggingEnabled
         Context.GetSetting <- fun s ->
             ConfigurationManager.AppSettings.[s]
             |> Option.ofObj
 
+    /// If true, Sitelets take priority over certain other handlers such as ASP.NET MVC if their URL space overlaps.
+    /// Default: true.
+    static member val OverrideHandler = true with get, set
+
     interface IHttpModule with
         member this.Init app =
+            match Loading.SiteletDefinition with
+            | None -> failwith "Failed to find WebSharper Sitelet definition. Add one in a WebSharper-translated assembly or do not load WebSharper.Sitelets.HttpModule."
+            | Some siteletDef ->
             let appPath = HttpRuntime.AppDomainAppVirtualPath
             let rootFolder = HttpRuntime.AppDomainAppPath
             Shared.Initialize(Path.Combine(rootFolder, "bin"), rootFolder)
             runtime <- Some (
-                Loading.SiteletDefinition,
+                siteletDef,
                 ResourceContext.ResourceContext appPath,
                 appPath,
                 rootFolder
             )
             let handler =
                 new EventHandler(fun x _ ->
-                    let app = (x :?> HttpApplication)
-                    let ctx = HttpContextWrapper(app.Context)
+                    let ctx = HttpContextWrapper((x :?> HttpApplication).Context)
                     if not (RpcHandler.IsRemotingRequest(ctx.Request)) then
                         tryGetHandler ctx |> Option.iter (fun h ->
-                            if HttpRuntime.UsingIntegratedPipeline then
-                                ctx.RemapHandler(h)
-                            else
-                                ctx.Handler <- h))
-            if HttpRuntime.UsingIntegratedPipeline
-            then app.add_PostAuthorizeRequest(handler)
-            else app.add_PostMapRequestHandler(handler)
+                            ctx.Items.["WebSharper.SiteletHandler"] <- h
+                            remap ctx h))
+            if HttpRuntime.UsingIntegratedPipeline then
+                app.add_PostAuthorizeRequest(handler)
+                // This is needed to override ASP.NET MVC:
+                if HttpModule.OverrideHandler then
+                    app.add_PostResolveRequestCache(new EventHandler(fun x _ ->
+                        let ctx = (x :?> HttpApplication).Context
+                        match ctx.Items.["WebSharper.SiteletHandler"] with
+                        | null -> ()
+                        | h -> remap (HttpContextWrapper ctx) (unbox h)
+                    ))
+            else 
+                app.add_PostMapRequestHandler(handler)
 
         member this.Dispose() = ()
 

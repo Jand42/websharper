@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -230,6 +230,16 @@ let ExactlyOne<'T> (s: seq<'T>) =
             invalidOp "Sequence contains more than one element"
         else x
     else invalidOp "Sequence contains no elements"
+
+[<Name "tryExactlyOne">]
+let TryExactlyOne<'T> (s: seq<'T>) =
+    use e = Enumerator.Get s
+    if e.MoveNext() then
+        let x = e.Current
+        if e.MoveNext() then
+            None
+        else Some x
+    else None
 
 [<Inline>]
 let Except (itemsToExclude: seq<'T>) (s: seq<'T>) =
@@ -622,6 +632,12 @@ let ToArray (s: seq<'T>) =
 
 [<Inline>]
 let ToList (s: seq<'T>) = List.ofSeq s
+
+[<Name "transpose">]
+let Transpose (x: seq<#seq<'T>>) : seq<seq<'T>> =
+    Seq.delay (fun () ->
+        ArrayTranspose (Array.ofSeq (x |> Seq.map Array.ofSeq)) |> As
+    )
 
 [<Name "truncate">]
 let Truncate (n: int) (s: seq<'T>) : seq<'T> =

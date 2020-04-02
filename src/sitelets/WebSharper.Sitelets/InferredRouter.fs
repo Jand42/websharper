@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -20,11 +20,12 @@
 
 namespace WebSharper.Sitelets
 
+open FSharp.Reflection
 open WebSharper
 open WebSharper.JavaScript
-open WebSharper.JQuery
 open System.Collections.Generic
 open System.Text
+open System.Globalization
 
 module internal ServerInferredOperators =
 
@@ -35,6 +36,12 @@ module internal ServerInferredOperators =
         | InvalidJson
         | MissingQueryParameter of string
         | MissingFormData of string
+
+    let (|ParseOk|_|) x =
+        match x with 
+        | StrictMode
+        | NoErrors -> Some ()
+        | _ -> None
 
     type MRoute =
         {
@@ -60,7 +67,7 @@ module internal ServerInferredOperators =
             {
                 Segments = path.Segments
                 QueryArgs = Http.ParametersFromMap(path.QueryArgs)
-                FormData = Http.EmptyParameters
+                FormData = Http.ParametersFromMap(path.FormData)
                 Method = path.Method
                 Body = path.Body
                 Result = StrictMode
@@ -136,10 +143,12 @@ module internal ServerInferredOperators =
                 p.Append('?').Append(q.ToString()) |> ignore
             p.ToString()
 
+    [<ReferenceEquality>]
     type InferredRouter =
         {
             IParse : MRoute -> obj option
             IWrite : PathWriter * obj -> unit 
+            IExplicitMethods : Set<string>
         }   
 
         member this.Link(action: 'T) =
@@ -159,6 +168,7 @@ module internal ServerInferredOperators =
         {
             IParse = fun _ -> None
             IWrite = ignore
+            IExplicitMethods = Set.empty
         }
 
     let internal iString : InferredRouter =
@@ -171,12 +181,24 @@ module internal ServerInferredOperators =
                         path.Segments <- t
                         Some (box s)
                     | _ -> None
-                | _ -> None
+                | [] -> 
+                    None
             IWrite = fun (w, value) ->
                 if isNull value then 
                     w.NextSegment().Append("null") |> ignore
-                else
+                elif unbox value <> "" then
                     w.NextSegment().Append(StringEncoding.write (unbox value)) |> ignore
+            IExplicitMethods = Set.empty
+        }
+
+    let internal iEmptyString : InferredRouter =
+        { iString with
+            IParse = fun path ->
+                match path.Segments with
+                | [] -> 
+                    Some (box "")
+                | _ ->
+                    None
         }
 
     let internal iChar : InferredRouter =
@@ -192,6 +214,7 @@ module internal ServerInferredOperators =
                 | _ -> None
             IWrite = fun (w, value) ->
                 w.NextSegment().Append(StringEncoding.write (string value)) |> ignore
+            IExplicitMethods = Set.empty
         }
 
     let inline iTryParse< ^T when ^T: (static member TryParse: string * byref< ^T> -> bool) and ^T: equality>() =
@@ -208,11 +231,31 @@ module internal ServerInferredOperators =
                 | _ -> None
             IWrite = fun (w, value) ->
                 w.NextSegment().Append(value) |> ignore
+            IExplicitMethods = Set.empty
+        }
+
+    let inline iTryParseFloat< ^T when ^T: (static member TryParse: string * NumberStyles * NumberFormatInfo * byref< ^T> -> bool) and ^T: equality>() =
+        {
+            IParse = fun path ->
+                match path.Segments with
+                | h :: t -> 
+                    let mutable res = Unchecked.defaultof< ^T>
+                    let ok =
+                        (^T: (static member TryParse: string * NumberStyles * NumberFormatInfo * byref< ^T> -> bool) 
+                            (h, NumberStyles.Float, NumberFormatInfo.InvariantInfo, &res))
+                    if ok then 
+                        path.Segments <- t
+                        Some (box res)
+                    else None
+                | _ -> None
+            IWrite = fun (w, value) ->
+                w.NextSegment().Append(string value) |> ignore
+            IExplicitMethods = Set.empty
         }
 
     let iGuid = iTryParse<System.Guid>()
     let iInt = iTryParse<int>()
-    let iDouble = iTryParse<double>()
+    let iDouble = iTryParseFloat<double>()
     let iSByte = iTryParse<sbyte>() 
     let iByte = iTryParse<byte>() 
     let iInt16 = iTryParse<int16>() 
@@ -220,7 +263,7 @@ module internal ServerInferredOperators =
     let iUInt = iTryParse<uint32>() 
     let iInt64 = iTryParse<int64>() 
     let iUInt64 = iTryParse<uint64>() 
-    let iSingle = iTryParse<single>() 
+    let iSingle = iTryParseFloat<single>() 
 
     let internal iBool : InferredRouter =
         {
@@ -235,6 +278,7 @@ module internal ServerInferredOperators =
                 | _ -> None
             IWrite = fun (w, value) ->
                 w.NextSegment().Append(if value :?> bool then "True" else "False") |> ignore
+            IExplicitMethods = Set.empty
         }
 
     let iDateTime format =
@@ -251,6 +295,7 @@ module internal ServerInferredOperators =
                 | _ -> None
             IWrite = fun (w, value) ->                
                 w.NextSegment().Append((value:?> System.DateTime).ToString(format)) |> ignore
+            IExplicitMethods = Set.empty
         }
 
     let iWildcardString = 
@@ -261,6 +306,7 @@ module internal ServerInferredOperators =
                 Some (box s)
             IWrite = fun (w, value) ->
                 w.NextSegment().Append(value) |> ignore
+            IExplicitMethods = Set.empty
         }
 
     let iWildcardArray (itemType: System.Type) (item: InferredRouter) = 
@@ -289,6 +335,7 @@ module internal ServerInferredOperators =
                 let l = arr.Length 
                 for i = 0 to l - 1 do
                     item.IWrite (w, arr.GetValue i) 
+            IExplicitMethods = item.IExplicitMethods
         }
 
     let IMap (decode: obj -> obj) (encode: obj -> obj) router =
@@ -297,6 +344,7 @@ module internal ServerInferredOperators =
                 router.IParse path |> Option.map decode
             IWrite = fun (w, value) ->
                 router.IWrite(w, encode value)
+            IExplicitMethods = router.IExplicitMethods
         }
 
     let iWildcardList (itemType: System.Type) (item: InferredRouter) : InferredRouter = 
@@ -319,6 +367,7 @@ module internal ServerInferredOperators =
                     w.NextSegment().Append("null") |> ignore
                 else
                     item.IWrite(w, value)
+            IExplicitMethods = item.IExplicitMethods
         }
 
     let error<'T> err path =
@@ -356,6 +405,42 @@ module internal ServerInferredOperators =
                     | _ -> Some (caseCtors.[0] [| v |])    
             IWrite = fun (w, value) ->
                 item.IWrite (w, decodeResultAction.Invoke(value, [||]))
+            IExplicitMethods = item.IExplicitMethods
+        }
+
+    let ICors (typ: System.Type) (item: InferredRouter) =
+        let corsTyp = typedefof<Cors<_>>.MakeGenericType(typ)
+        let ctor = FSharpValue.PreComputeRecordConstructor(corsTyp, true)
+        let defaultAllows : option<CorsAllows> =
+            Some {
+                Origins = []
+                Methods = List.ofSeq item.IExplicitMethods
+                Headers = []
+                ExposeHeaders = []
+                MaxAge = None
+                Credentials = false
+            }
+        let epOptionTyp = typedefof<option<_>>.MakeGenericType(typ)
+        let epOptionCases = FSharpType.GetUnionCases epOptionTyp
+        let epNone = FSharpValue.MakeUnion(epOptionCases.[0], [||])
+        let epSome = FSharpValue.PreComputeUnionConstructor epOptionCases.[1]
+        let preflight = ctor [| box defaultAllows; epNone |]
+        let request x = ctor [| box defaultAllows; epSome [| x |] |]
+        let getEndPointOption = FSharpValue.PreComputeRecordFieldReader (corsTyp.GetProperty "EndPoint")
+        let getEndPointSome = FSharpValue.PreComputeUnionReader epOptionCases.[1]
+        {
+            IParse = fun path ->
+                match path.Method with
+                | Some "OPTIONS" ->
+                    path.Segments <- []
+                    path.Result <- ParseResult.NoErrors
+                    Some preflight
+                | _ -> Option.map request (item.IParse path)
+            IWrite = fun (w, value) ->
+                match getEndPointOption value with
+                | null -> ()
+                | o -> item.IWrite(w, (getEndPointSome o).[0])
+            IExplicitMethods = Set.add "OPTIONS" item.IExplicitMethods
         }
 
     let IQuery key (item: InferredRouter) : InferredRouter =
@@ -376,6 +461,7 @@ module internal ServerInferredOperators =
                 w.QueryWriter.Append(key).Append('=') |> ignore
                 let qw = { w with PathWriter = q; AddSlash = false }
                 item.IWrite (qw, value)
+            IExplicitMethods = Set.empty
         }
 
     type IOptionConverter =
@@ -414,6 +500,7 @@ module internal ServerInferredOperators =
                 w.QueryWriter.Append(key).Append('=') |> ignore
                 let qw = { w with PathWriter = q; AddSlash = false }
                 item.IWrite (qw, v)
+            IExplicitMethods = Set.empty
         }
 
     let IQueryNullable key (item: InferredRouter) : InferredRouter =
@@ -437,6 +524,7 @@ module internal ServerInferredOperators =
                 w.QueryWriter.Append(key).Append('=') |> ignore
                 let qw = { w with PathWriter = q; AddSlash = false }
                 item.IWrite (qw, v)
+            IExplicitMethods = Set.empty
         }
 
     let Unbox<'A when 'A: equality> (router: InferredRouter) : Router<'A> =
@@ -474,6 +562,7 @@ module internal ServerInferredOperators =
                     try Some (Json.Deserialize<'T> b |> box)
                     with _ -> error InvalidJson path
             IWrite = ignore
+            IExplicitMethods = Set.empty
         }
 
     let IFormData (item: InferredRouter) : InferredRouter =
@@ -485,6 +574,7 @@ module internal ServerInferredOperators =
                 | _ -> ()
                 res
             IWrite = ignore
+            IExplicitMethods = Set.empty
         }
 
     let internal ITuple (readItems: obj -> obj[]) (createTuple: obj[] -> obj) (items: InferredRouter[]) =
@@ -510,6 +600,14 @@ module internal ServerInferredOperators =
                 let values = readItems value
                 for i = 0 to items.Length - 1 do
                     items.[i].IWrite (w, values.[i]) 
+            IExplicitMethods =
+                items
+                |> Seq.choose (fun i ->
+                    if Set.isEmpty i.IExplicitMethods
+                    then None
+                    else Some i.IExplicitMethods
+                )
+                |> Set.unionMany
         }
 
     let internal IRecord (readFields: obj -> obj[]) (createRecord: obj[] -> obj) (fields: InferredRouter[]) =
@@ -535,6 +633,14 @@ module internal ServerInferredOperators =
                 (readFields value, fields) ||> Array.iter2 (fun v r ->
                     r.IWrite(w, v)
                 )
+            IExplicitMethods =
+                fields
+                |> Seq.choose (fun i ->
+                    if Set.isEmpty i.IExplicitMethods
+                    then None
+                    else Some i.IExplicitMethods
+                )
+                |> Set.unionMany
         }
 
     let IDelayed (getRouter: unit -> InferredRouter) : InferredRouter =
@@ -542,6 +648,7 @@ module internal ServerInferredOperators =
         {
             IParse = fun path -> r.Value.IParse path
             IWrite = fun (w, value) -> r.Value.IWrite(w, value)
+            IExplicitMethods = Set.empty
         }
 
     let internal IArray (itemType: System.Type) (item: InferredRouter) : InferredRouter =
@@ -574,6 +681,7 @@ module internal ServerInferredOperators =
                 w.NextSegment().Append(arr.Length) |> ignore
                 for i = 0 to l - 1 do
                     item.IWrite (w, arr.GetValue i) 
+            IExplicitMethods = item.IExplicitMethods
         }
 
     let IList (itemType: System.Type) (item: InferredRouter) : InferredRouter = 
@@ -582,104 +690,169 @@ module internal ServerInferredOperators =
             :?> Router.IListArrayConverter
         IArray itemType item |> IMap converter.OfArray converter.ToArray
 
-    let internal IUnion getTag (caseReaders: _[]) (caseCtors: _[]) (cases: ((option<string> * string[])[] * InferredRouter[])[]) : InferredRouter =
-        let lookupCases =
-            cases |> Seq.indexed |> Seq.collect (fun (i, (eps, fields)) -> 
-                let fieldList = List.ofArray fields
-                let l = fields.Length
-                let parseFields p path =
-                    let arr = Array.zeroCreate l
-                    let origSegments = path.Segments
-                    let rec collect j f =
-                        match f with 
+    type internal UnionCaseRoutingInfo =
+        {
+            EndPoints: (option<string> * string[])[]
+            Fields: InferredRouter[]
+            HasWildCard: bool
+        }
+
+    let internal IUnion getTag (caseReaders: _[]) (caseCtors: _[]) (cases: UnionCaseRoutingInfo[]) : InferredRouter =
+
+        let methods =
+            cases
+            |> Array.map (fun u ->
+                let fieldMethods =
+                    u.Fields
+                    |> Array.choose (fun f ->
+                        if Set.isEmpty f.IExplicitMethods
+                        then None
+                        else Some f.IExplicitMethods)
+                    |> Set.unionMany
+                u.EndPoints
+                |> Array.map (function
+                    | None, _ -> fieldMethods
+                    | Some m, _ -> Set.singleton m
+                )
+                |> Set.unionMany
+            )
+            |> Set.unionMany
+
+        let parseWithOrWithoutWildcards useWildcards =
+
+            let lookupCasesByMethod =
+                cases |> Seq.indexed
+                |> Seq.collect (fun (i, c) ->
+                    // for cases ending with any number of field segments, generate extra parses cases
+                    // where they are all parsing empty strings from reaching the end of a route
+                    let fieldsLength = c.Fields.Length
+                    Some (List.rev (List.ofArray c.Fields), 0)
+                    |> List.unfold (
+                        function
+                        | Some (f, e) ->
+                            let case = 
+                                i, c, List.rev (List.replicate e iEmptyString @ f), fieldsLength - e
+                            match f with
+                            | h :: t when h = iString ->
+                                Some (case, Some (t, e + 1))
+                            | _ ->
+                                Some (case, None)
+                        | None -> None
+                    )
+                )
+                |> Seq.collect (fun (i, c, fieldList, fieldsLength) -> 
+                    if c.HasWildCard && not useWildcards then Seq.empty else
+                    let l = c.Fields.Length
+                    let parseFields p path =
+                        let arr = Array.zeroCreate l
+                        let origSegments = path.Segments
+                        let rec collect j f =
+                            match f with 
+                            | [] -> 
+                                Some (caseCtors.[i] arr)
+                            | h :: t -> 
+                                match h.IParse path with
+                                | Some a -> 
+                                    arr.[j] <- a
+                                    collect (j + 1) t
+                                | None -> 
+                                    path.Segments <- origSegments
+                                    None
+                        path.Segments <- p
+                        collect 0 fieldList
+                    // a heuristic is used for performance:
+                    // inferred parsing is forward only, cases with more segments are checked first
+                    c.EndPoints |> Seq.map (fun (m, s) ->
+                        let s = List.ofArray s
+                        m,
+                        match s with
                         | [] -> 
-                            Some (caseCtors.[i] arr)
-                        | h :: t -> 
-                            match h.IParse path with
-                            | Some a -> 
-                                arr.[j] <- a
-                                collect (j + 1) t
-                            | None -> 
-                                path.Segments <- origSegments
-                                None
-                    path.Segments <- p
-                    collect 0 fieldList
-                eps |> Seq.map (fun (m, s) ->
-                    let s = List.ofArray s
+                            "",
+                            match fieldList with
+                            | [] ->
+                                let c = caseCtors.[i] [||]
+                                -1,
+                                fun p path -> Some c
+                            | _ ->
+                                fieldsLength - 1, parseFields
+                        | [ h ] ->
+                            h, 
+                            match fieldList with
+                            | [] ->
+                                let c = caseCtors.[i] [||]
+                                0,
+                                fun p path -> 
+                                    path.Segments <- p
+                                    Some c
+                            | _ ->
+                                fieldsLength, parseFields
+                        | h :: t ->
+                            h, 
+                            match fieldList with
+                            | [] ->
+                                let c = caseCtors.[i] [||]
+                                t.Length,
+                                fun p path -> 
+                                    match p |> List.startsWith t with
+                                    | Some p ->
+                                        path.Segments <- p
+                                        Some c
+                                    | None -> None
+                            | _ ->
+                                t.Length + fieldsLength,
+                                fun p path ->
+                                    match p |> List.startsWith t with
+                                    | Some p -> parseFields p path
+                                    | None -> None
+                    )
+                ) 
+                // group by method
+                |> Seq.groupBy fst |> Array.ofSeq
+            let casesWithoutExplicitMethod =
+                lookupCasesByMethod 
+                |> Array.tryFind (fst >> Option.isNone) 
+                |> Option.map (snd >> Seq.map snd)
+                |> Option.defaultValue Seq.empty
+            let lookupCases =
+                lookupCasesByMethod
+                |> Seq.map (fun (m, mcases) ->
                     m,
-                    match s with
-                    | [] -> 
-                        "",
-                        match fieldList with
-                        | [] ->
-                            let c = caseCtors.[i] [||]
-                            -1,
-                            fun p path -> Some c
-                        | _ ->
-                            fieldList.Length - 1, parseFields
-                    | [ h ] ->
+                    mcases |> Seq.map snd 
+                    |> Seq.append (
+                        // include looking up cases with non-specified methods
+                        match m with
+                        | None -> Seq.empty
+                        | _ -> casesWithoutExplicitMethod
+                    )
+                    |> Seq.groupBy fst
+                    |> Seq.map (fun (h, hcases) ->
                         h, 
-                        match fieldList with
-                        | [] ->
-                            let c = caseCtors.[i] [||]
-                            0,
-                            fun p path -> 
-                                path.Segments <- p
-                                Some c
-                        | _ ->
-                            fieldList.Length, parseFields
-                    | h :: t ->
-                        h, 
-                        match fieldList with
-                        | [] ->
-                            let c = caseCtors.[i] [||]
-                            t.Length,
-                            fun p path -> 
-                                path.Segments <- p
-                                Some c
-                        | _ ->
-                            t.Length + fieldList.Length,
+                        match hcases |> Seq.map snd |> List.ofSeq with
+                        | [ _, parse ] -> parse
+                        | parsers ->
+                            // this is just an approximation, start with longer parsers
+                            let parsers = parsers |> Seq.sortByDescending fst |> Seq.map snd |> Array.ofSeq 
                             fun p path ->
-                                match p |> List.startsWith t with
-                                | Some p -> parseFields p path
-                                | None -> None
+                                parsers |> Array.tryPick (fun parse -> parse p path)                        
+                    )
+                    |> dict 
                 )
-            ) 
-            // group by method
-            |> Seq.groupBy fst |> Seq.map (fun (m, mcases) ->
-                m,
-                mcases |> Seq.map snd |> Seq.groupBy fst
-                |> Seq.map (fun (h, hcases) ->
-                    h, 
-                    match hcases |> Seq.map snd |> List.ofSeq with
-                    | [ _, parse ] -> parse
-                    | parsers ->
-                        // this is just an approximation, start with longer parsers
-                        let parsers = parsers |> Seq.sortByDescending fst |> Seq.map snd |> Array.ofSeq 
-                        fun p path ->
-                            parsers |> Array.tryPick (fun parse -> parse p path)                        
-                )
-                |> dict 
-            )
-            |> dict
-        let writeCases =
-            cases |> Array.map (fun (eps, fields) -> 
-                String.concat "/" (snd eps.[0]), fields
-            )
-        let parseWithLookup (lookup: IDictionary<_,_>) path =
-            match path.Segments with
-            | [] -> 
-                match lookup.TryGetValue("") with
-                | true, parse -> parse [] path
-                | _ -> None
-            | h :: t ->
-                match lookup.TryGetValue(h) with
-                | true, parse -> parse t path
-                | _ ->
+                |> dict
+
+            let parseWithLookup (lookup: IDictionary<_,_>) path =
+                match path.Segments with
+                | [] -> 
                     match lookup.TryGetValue("") with
-                    | true, parse -> parse path.Segments path
-                    | _ -> None 
-        let parse =
+                    | true, parse -> parse [] path
+                    | _ -> None
+                | h :: t ->
+                    match lookup.TryGetValue(h) with
+                    | true, parse -> parse t path
+                    | _ ->
+                        match lookup.TryGetValue("") with
+                        | true, parse -> parse path.Segments path
+                        | _ -> None 
+
             match lookupCases.TryGetValue(None) with
             | true, lookup when lookupCases.Count = 1 -> 
                 // no union case specifies a method
@@ -721,6 +894,39 @@ module internal ServerInferredOperators =
                     // not found with explicit method, fall back to cases ignoring method
                     let res = parseWithLookup ignoreMethodLookup path
                     if Option.isNone res then notFound() else res
+        
+        let hasWildcardCase =
+            cases |> Seq.exists (fun c -> c.HasWildCard) 
+        
+        let parse =
+            if hasWildcardCase then
+                let parseWithoutWildcards = parseWithOrWithoutWildcards false
+                let parseWithWildcards = parseWithOrWithoutWildcards true
+
+                fun (path: MRoute) ->
+                    let origSegments = path.Segments
+                    let origResult = path.Result
+                    match parseWithoutWildcards path with
+                    | None ->
+                        path.Segments <- origSegments
+                        parseWithWildcards path
+                    | res ->
+                        match path.Segments, path.Result with
+                        | [], ParseOk -> 
+                            // if parsed fully without Wildcard, use that
+                            res
+                        | _ ->
+                            // otherwise restore path state and use full parsing
+                            path.Segments <- origSegments
+                            path.Result <- origResult
+                            parseWithWildcards path
+            else
+                parseWithOrWithoutWildcards false
+        
+        let writeCases =
+            cases |> Array.map (fun c -> 
+                String.concat "/" (snd c.EndPoints.[0]), c.Fields
+            )
         {
             IParse = parse
             IWrite = fun (w, value) ->
@@ -734,6 +940,7 @@ module internal ServerInferredOperators =
                     let values = caseReaders.[tag] value : _[]
                     for i = 0 to fields.Length - 1 do
                         fields.[i].IWrite (w, values.[i]) 
+            IExplicitMethods = methods
         }
 
     let internal isCorrectMethod m p =
@@ -757,6 +964,8 @@ module internal ServerInferredOperators =
         let partsAndRoutersLists = 
             partsAndRoutersLists
             |> Array.sortByDescending (fun (_, ep) -> ep.Length)
+        let methods =
+            Set.unionMany [for f in fields -> Set f.IExplicitMethods]
         let thisClass =
             {
                 IParse = fun path ->
@@ -793,6 +1002,7 @@ module internal ServerInferredOperators =
                         | Choice2Of2 (i, r) ->
                             r.IWrite(w, values.[i])
                     )
+                IExplicitMethods = methods
             }
         if Array.isEmpty subClasses then
             thisClass
@@ -808,4 +1018,7 @@ module internal ServerInferredOperators =
                     match sub with 
                     | Some s -> s.IWrite (w, value)
                     | _ -> thisClass.IWrite (w, value)
+                IExplicitMethods =
+                    (methods :: [for (_, c) in subClasses -> Set c.IExplicitMethods])
+                    |> Set.unionMany
             }

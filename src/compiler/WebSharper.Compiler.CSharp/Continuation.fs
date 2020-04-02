@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -72,12 +72,9 @@ type AwaitTransformer() =
     override this.TransformAwait(a) =
         let awaited = Id.New "$await"
         let doneLabel = Id.New "$done"
-        let setStatus s = ItemSet(Var awaited, Value (String "exc"), !~(Int s))
-        let start = Call(Some (Var awaited), NonGeneric Definitions.Task, TaskMethod.Start, [])
         let exc = ItemGet(Var awaited, Value (String "exc"), NoSideEffect)
         Sequential [
             NewVar(awaited, this.TransformExpression a)
-            Conditional (setStatus 0, start, Undefined)
             IgnoredStatementExpr <| Continuation(doneLabel, Var awaited)
             IgnoredStatementExpr <| Labeled(doneLabel, Empty)
             IgnoredStatementExpr <| If (exc, Throw exc, Empty)
@@ -278,6 +275,7 @@ type ContinuationTransformer(labels) =
     let stateVar = Id.New "$state"
     let topLabel = Id.New "$top"
     let localFunctions = ResizeArray()
+    let mutable tryScope = 0
 
 //    let mutable currentFinallyIndex = None
 //    let mutable hasFinally = false
@@ -301,6 +299,8 @@ type ContinuationTransformer(labels) =
     member this.StateVar = stateVar
     
     member this.LocalFunctions = localFunctions :> _ seq
+
+    member this.TryScope = tryScope
 
     override this.TransformGoto(a) =
         gotoIndex labelLookup.[a]
@@ -341,11 +341,17 @@ type ContinuationTransformer(labels) =
                     addStatements i 
             | Labeled(_, TryWith(body, e, catch)) ->
                 multScope <| fun () ->
+                    tryScope <- tryScope + 1
                     addStatements body
-                    currentScope.Add (Catch (e, this.TransformStatement catch))
+                    tryScope <- tryScope - 1
+                    currentScope.Add (Catch (e, CombineStatements [ this.TransformStatement catch; gotoIndex (nextIndex + 1) ] ))
+                newState()
+                currentScope.Add (SingleState lastState)
             | Labeled(_, TryFinally(body, final)) ->
                 multScope <| fun () ->
+                    tryScope <- tryScope + 1
                     addStatements body
+                    tryScope <- tryScope - 1
                     currentScope.Add (Finally (this.TransformStatement final))
             | Labeled (_, ls) ->
                 newState()
@@ -481,7 +487,7 @@ type AsyncTransformer(labels, returns) =
     override this.Yield(v) =
         Block [
             ExprStatement <| Call(Some v, NonGeneric Definitions.Task, TaskMethod.OnCompleted, [ Var run ])
-            Return (Value (Bool true))         
+            Return Undefined        
         ]
 
     override this.TransformReturn(a) =
@@ -490,9 +496,21 @@ type AsyncTransformer(labels, returns) =
                 yield ExprStatement <| ItemSet(Var task, Value (String "result"), a)
             yield ExprStatement <| ItemSet(Var task, Value (String "status"), Value (Int (int System.Threading.Tasks.TaskStatus.RanToCompletion)))
             yield ExprStatement <| Call(Some (Var task), NonGeneric Definitions.Task, TaskMethod.RunContinuations, [])
-            yield Return (Value (Bool false))         
+            yield Return Undefined   
         ]
 
+    override this.TransformThrow(a) =
+        if this.TryScope = 0 then
+            Block [
+                if IgnoreExprSourcePos a <> Undefined then
+                    yield ExprStatement <| ItemSet(Var task, Value (String "exc"), a)
+                yield ExprStatement <| ItemSet(Var task, Value (String "status"), Value (Int (int System.Threading.Tasks.TaskStatus.Faulted)))
+                yield ExprStatement <| Call(Some (Var task), NonGeneric Definitions.Task, TaskMethod.RunContinuations, [])
+                yield Return Undefined
+            ]
+        else
+            Throw(a)
+        
     member this.TransformMethodBody(s: Statement) =
         let extract = ExtractVarDeclarations()
         let inner =

@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -113,6 +113,7 @@ module private ClientRoutingInternals =
     let rWildCardOp = getMethod <@ RouterOperators.rWildcard @>
     let rWildCardArrayOp = getMethod <@ RouterOperators.rWildcardArray RouterOperators.rInt @>
     let rWildCardListOp = getMethod <@ RouterOperators.rWildcardList RouterOperators.rInt @>
+    let rCorsOp = getMethod <@ RouterOperators.rCors Unchecked.defaultof<_> @>
 
     let (|T|) (t: TypeDefinition) = t.Value.FullName
     let (|C|_|) (t: Type) =
@@ -202,7 +203,7 @@ type RoutingMacro() =
             and fieldRouter (t: Type) (annot: Annotation) name =
                 let name =
                     match annot.EndPoints with
-                    | (_, n, _) :: _ -> n
+                    | { Path = n } :: _ -> n
                     | _ -> name
                 let r() = getRouter t
                 match annot.Query with
@@ -263,6 +264,8 @@ type RoutingMacro() =
                     true, Call(None, NonGeneric routerOpsModule, Generic ListOp [ t ], [ getRouter t ])    
                 | C (T "System.Nullable`1", [ t ]) ->
                     true, Call(None, NonGeneric routerOpsModule, Generic NullableOp [ t ], [ getRouter t ])    
+                | C (T "WebSharper.Sitelets.Cors`1", [ t ]) ->
+                    true, Call(None, NonGeneric routerOpsModule, Generic rCorsOp [ t ], [ getRouter t ]) 
                 | C (e, g) ->
                     let getProto() =
                         match comp.GetClassInfo e with
@@ -298,12 +301,12 @@ type RoutingMacro() =
                                     u.Cases |> List.map (fun c ->
                                         let annot = comp.GetMethodAttributes(e, M.UnionCaseConstructMethod e c) |> getAnnotNamed c.Name
                                         let endpoints =
-                                            annot.EndPoints |> List.map (fun (m, e, _) -> 
+                                            annot.EndPoints |> List.map (fun e -> 
                                                 let paths =
-                                                    match S.ReadEndPointString e with
+                                                    match S.ReadEndPointString e.Path with
                                                     | [||] -> NewArray []
                                                     | s -> s |> Seq.map cString |> List.ofSeq |> NewArray
-                                                NewArray [ optOf m; paths ]
+                                                NewArray [ optOf e.Method; paths ]
                                             ) |> NewArray
                                         let constant, routers = 
                                             match c.Kind with
@@ -341,6 +344,8 @@ type RoutingMacro() =
                             failwithf "Failed to create Router for type %O, F# union case types are not supported yet" t
                         | M.DelegateInfo _ ->
                             failwithf "Failed to create Router for type %O, delegate types are not supported" t
+                        | M.FSharpAnonRecordInfo _ ->
+                            failwith "Failed to create Router, anonymous F# record types are not supported"
                         | M.StructInfo
                         | M.NotCustomType ->
                             if not allJSClassesInitialized then
@@ -368,8 +373,8 @@ type RoutingMacro() =
                                         annot
                                 let annot = getClassAnnotation e 
                                 let endpoints = 
-                                    annot.EndPoints |> List.map (fun (m, p, _) -> 
-                                        m, Route.FromUrl p |> S.GetPathHoles |> fst
+                                    annot.EndPoints |> List.map (fun e ->
+                                        e.Method, Route.FromUrl e.Path |> S.GetPathHoles |> fst
                                     ) 
                                 let endpoints =
                                     if List.isEmpty endpoints then [None, [||]] else endpoints

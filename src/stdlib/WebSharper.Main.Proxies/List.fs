@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -41,7 +41,7 @@ type private ListProxy<'T> =
 
     member this.Length with get () = List.length (As this)
 
-    member this.Item with get (x: int) : 'T = List.nth (As this) x
+    member this.Item with get (x: int) : 'T = List.item x (As this)
 
     interface System.Collections.IEnumerable with
         member this.GetEnumerator() = (this :> _ seq).GetEnumerator() :> _

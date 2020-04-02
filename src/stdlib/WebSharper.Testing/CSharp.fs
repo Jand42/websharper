@@ -1,4 +1,23 @@
-﻿namespace WebSharper.Testing
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you
+// may not use this file except in compliance with the License.  You may
+// obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.  See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// $end{copyright}
+namespace WebSharper.Testing
 
 open System
 open System.Threading.Tasks
@@ -10,10 +29,22 @@ type private T = System.AttributeTargets
 type private U = System.AttributeUsageAttribute
 type private BF = System.Reflection.BindingFlags
 
+type TestKind =
+    | Test = 0
+    | Skip = 1
+    | Todo = 2
+
 [<JavaScript>]
 type TestCategory() =
 
     let mutable asserter : QUnit.Asserter = Unchecked.defaultof<_>
+
+    let run kind name f =
+        match kind with
+        | TestKind.Test -> QUnit.Test name f
+        | TestKind.Skip -> QUnit.Skip name f
+        | TestKind.Todo -> QUnit.Todo name f
+        | _ -> invalidArg "kind" "Invalid test kind"
 
     // So that mistyping Equal as Equals gives a warning immediately
     [<JavaScript(false); Obsolete "Use Equal for testing, or object.Equals if that is needed">]
@@ -146,13 +177,13 @@ type TestCategory() =
     member this.Expect(n: int) =
         asserter.Expect(n)
 
-    member internal this.Run(name: string, f: unit -> unit) =
-        QUnit.Test name (fun a ->
+    member internal this.Run(name: string, kind: TestKind, f: unit -> unit) =
+        run kind name (fun a ->
             asserter <- a
             f())
 
-    member internal this.Run(name: string, f: unit -> Task) =
-        QUnit.Test name (fun a ->
+    member internal this.Run(name: string, kind: TestKind, f: unit -> Task) =
+        run kind name (fun a ->
             asserter <- a
             let ``done`` = asserter.Async()
             let t = f()
@@ -160,10 +191,12 @@ type TestCategory() =
             if t.Status = TaskStatus.Created then t.Start())
 
 [<Sealed; U(T.Class|||T.Method)>]
-type TestAttribute(name: string) =
+type TestAttribute(name: string, kind: TestKind) =
     inherit Attribute()
+    new(name) = TestAttribute(name, TestKind.Test)
     new() = TestAttribute(null)
     member this.Name = name
+    member this.Kind = kind
 
 [<AutoOpen>]
 module private Internals =
@@ -191,7 +224,7 @@ type TestGenerator() =
             |> Array.tryPick (function
                 | :? TestAttribute as a ->
                     let name = match a.Name with null -> m.Name | n -> n
-                    Some (m, name)
+                    Some (m, name, a.Kind)
                 | _ -> None))
 
     let genTestCategory' (t: Type) =
@@ -200,7 +233,7 @@ type TestGenerator() =
         | ctor ->
             let make = Expr.NewObject(ctor, [])
             let methods = findTestMethods t
-            let findRunFor (m: Reflection.MethodInfo) name v = choice {
+            let findRunFor (m: Reflection.MethodInfo) name kind v = choice {
                 let fullName = m.DeclaringType.FullName + "." + m.Name
                 let! e =
                     match m.GetParameters() with
@@ -223,19 +256,19 @@ type TestGenerator() =
                         should have none (for a simple test) or one (for a property test).")
                 let v = coerce<TestCategory> v
                 if m.ReturnType = typeof<Void> then
-                    return <@ (%v).Run(name, fun () -> %%e : unit) @>
+                    return <@ (%v).Run(name, kind, fun () -> %%e : unit) @>
                 elif m.ReturnType = typeof<Task> then
-                    return <@ (%v).Run(name, fun () -> %%e : Task) @>
+                    return <@ (%v).Run(name, kind, fun () -> %%e : Task) @>
                 else
                     let msg = fullName + " has invalid type, should take no argument \
                         and return either void or Task. It will not be run."
                     return! Choice2Of2 msg
             }
             ((<@ () @>, []), methods)
-            ||> Array.fold (fun (pred, w) (m, name) ->
+            ||> Array.fold (fun (pred, w) (m, name, kind) ->
                 let var = Var("x", t)
                 let v = Expr.Var var
-                match findRunFor m name v with
+                match findRunFor m name kind v with
                 | Choice1Of2 run ->
                     <@ %pred; (%%(Expr.Let(var, make, <@ %run @>))) @>, w
                 | Choice2Of2 msg -> pred, msg :: w)
@@ -249,7 +282,7 @@ type TestGenerator() =
                     match m.Member with
                     | GeneratedMethod (typ, _) ->
                         try (WebSharper.Core.AST.Reflection.LoadTypeDefinition typ).Assembly
-                        with _ -> failwith "Could not load containing type."
+                        with e -> failwithf "Could not load containing type %A:\n%O" typ e
                     | _ -> failwith "TestGenerator must be used on a non-implementation method."
                 | Some (:? string as n) ->
                     try Reflection.Assembly.Load(n)

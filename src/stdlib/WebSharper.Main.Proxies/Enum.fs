@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -33,7 +33,7 @@ type internal EnumProxy =
     member p.HasFlag (flag: System.Enum) = false
 
     [<Inline "$this === $x">]
-    member this.Equals(x: obj) = X<bool>
+    override this.Equals(x: obj) = X<bool>
 
     [<Inline>]
-    member this.GetHashCode() = hash this
+    override this.GetHashCode() = hash this

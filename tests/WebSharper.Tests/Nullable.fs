@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -43,9 +43,14 @@ let Tests =
             isTrue (Nullable(2).HasValue)
         }
 
-        Test "GetValueOrDefault" {
+        Test "GetValueOrDefault(x)" {
             equal (Nullable<int>().GetValueOrDefault(2)) 2
             equal (Nullable(1).GetValueOrDefault(2)) 1
+        }
+
+        Test "GetValueOrDefault()" {
+            equal (Nullable<int>().GetValueOrDefault()) 0
+            equal (Nullable(32).GetValueOrDefault()) 32
         }
 
         Test "Operators" {

@@ -34,8 +34,6 @@ type OptionalFieldKind =
     /// The field has type Optional<'T>
     | ErasedOption = 3
 
-let ServerSideProvider = WebSharper.Core.Json.Provider.Create ()
-
 [<JavaScript>]
 module Provider =
     let Id () = 
@@ -390,15 +388,19 @@ module Macro =
                     fail "JSON serialization for multidimensional arrays is not supported."
                 | VoidType
                 | C (T ("Microsoft.FSharp.Core.Unit"
-                                |"System.Boolean"
-                                |"System.SByte" | "System.Byte"
-                                |"System.Int16" | "System.UInt16"
-                                |"System.Int32" | "System.UInt32"
-                                |"System.Int64" | "System.UInt64"
-                                |"System.Single"| "System.Double"
-                                |"System.String"| "System.Guid"
-                                |"WebSharper.Core.Json+Encoded"), []) ->
+                            | "System.Boolean"
+                            | "System.SByte"   | "System.Byte"
+                            | "System.Int16"   | "System.UInt16"
+                            | "System.Int32"   | "System.UInt32"
+                            | "System.Int64"   | "System.UInt64"
+                            | "System.Single"  | "System.Double"
+                            | "System.String"  | "System.Guid"
+                            | "WebSharper.Core.Json+Encoded"), []) ->
                     ok ident
+                | C (T "System.Object", []) ->
+                    if isEnc then 
+                        fail "JSON serialization for System.Object is not supported; only deserialization." 
+                    else ok ident
                 | C (T "Microsoft.FSharp.Collections.FSharpList`1", [t]) ->
                     encode t >>= fun e ->
                     ok (call "List" [e])

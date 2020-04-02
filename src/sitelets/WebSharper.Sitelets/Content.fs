@@ -87,12 +87,6 @@ module Content =
                 Core.Resources.Rendering.RenderCached(ctx.ResourceContext, r, tw)
         hasResources
 
-    let writeStartScript (tw: HtmlTextWriter) =
-        tw.WriteLine(@"<script type='{0}'>", CT.Text.JavaScript.Text)
-        tw.WriteLine @"if (typeof IntelliFactory !=='undefined')"
-        tw.WriteLine @"  IntelliFactory.Runtime.Start();"
-        tw.WriteLine @"</script>"
-
     type RenderedResources =
         {
             Scripts : string
@@ -121,7 +115,7 @@ module Content =
                 | Core.Resources.Styles -> stylesTw
                 | Core.Resources.Meta -> metaTw)
         if hasResources then
-            writeStartScript scriptsTw
+            scriptsTw.WriteStartCode(ctx.ResourceContext.ScriptBaseUrl)
         {
             Scripts = scriptsW.ToString()
             Styles = stylesW.ToString()
@@ -132,7 +126,7 @@ module Content =
         use w = new StringWriter()
         use tw = new HtmlTextWriter(w, " ")
         let hasResources = writeResources ctx controls (fun _ -> tw)
-        if hasResources then writeStartScript tw
+        if hasResources then tw.WriteStartCode(ctx.ResourceContext.ScriptBaseUrl)
         w.ToString()
 
     let toCustomContentAsync (genPage: Context<'T> -> Async<Page>) context : Async<Http.Response> =
@@ -144,7 +138,7 @@ module Content =
                     let hasResources = writeResources context body (fun _ -> tw)
                     for elem in htmlPage.Head do
                         elem.Write(context, tw)
-                    if hasResources then writeStartScript tw
+                    if hasResources then tw.WriteStartCode(context.ResourceContext.ScriptBaseUrl)
                 let renderBody (tw: HtmlTextWriter) =
                     for elem in body do
                         elem.Write(context, tw)
@@ -336,6 +330,58 @@ module Content =
     let Ok<'T> : Async<Content<'T>> =
         httpStatusContent Http.Status.Ok
 
+    let getOkOrigin (allows: CorsAllows) (request: Http.Request) =
+        request.Headers
+        |> Seq.tryFind (fun h -> h.Name.ToLowerInvariant() = "origin")
+        |> Option.bind (fun origin ->
+            if allows.Origins |> Seq.contains origin.Value then Some origin.Value
+            elif allows.Origins |> Seq.contains "*" then Some "*"
+            else None
+        )
+
+    let Cors (cors: Cors<'T>) (allows: CorsAllows -> CorsAllows) (content: 'T -> Async<Content<'U>>) : Async<Content<'U>> =
+        let allows = allows (defaultArg cors.DefaultAllows CorsAllows.Empty)
+        let headers (ctx: Context<'U>) =
+            match getOkOrigin allows ctx.Request with
+            | Some origin ->
+                [
+                    yield Http.Header.Custom "Access-Control-Allow-Origin" origin
+                    match List.ofSeq allows.Methods with
+                    | [] -> ()
+                    | l -> yield Http.Header.Custom "Access-Control-Allow-Methods" (String.concat ", " l)
+                    match List.ofSeq allows.Headers with
+                    | [] -> ()
+                    | l -> yield Http.Header.Custom "Access-Control-Allow-Headers" (String.concat ", " l)
+                    match List.ofSeq allows.ExposeHeaders with
+                    | [] -> ()
+                    | l -> yield Http.Header.Custom "Access-Control-Expose-Headers" (String.concat ", " l)
+                    match allows.MaxAge with
+                    | None -> ()
+                    | Some age -> yield Http.Header.Custom "Access-Control-Max-Age" (string age)
+                    if allows.Credentials then
+                        yield Http.Header.Custom "Access-Control-Allow-Credentials" "true"
+                ]
+            | None -> []
+        match cors.EndPoint with
+        | None ->
+            CustomContent <| fun ctx ->
+                {
+                    Status = Http.Status.Ok
+                    Headers = headers ctx
+                    WriteBody = ignore
+                }
+            |> async.Return
+        | Some ep ->
+            CustomContentAsync <| fun ctx -> async {
+                let! content = content ep
+                let! resp =
+                    match content with
+                    | CustomContent f -> async.Return (f ctx)
+                    | CustomContentAsync f -> f ctx
+                return { resp with Headers = Seq.append (headers ctx) resp.Headers }
+            }
+            |> async.Return
+
 [<System.Runtime.CompilerServices.Extension; Sealed>]
 type ContextExtensions =
 
@@ -445,6 +491,8 @@ type CSharpContent =
         | _ -> Some x
 
     member this.AsContent = this.c
+
+    static member FromContent(c: Content<obj>) = new CSharpContent(c)
 
     static member TaskAsContent (t: Task<CSharpContent>) =
         t.Map(fun c -> c.AsContent)

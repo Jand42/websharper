@@ -26,6 +26,8 @@ open WebSharper
 open WebSharper.JavaScript
 open WebSharper.Testing
 
+module IM = WebSharper.Collections.Tests.Interop.Module
+
 #nowarn "40" // recursive values
 
 [<JavaScript>]
@@ -103,6 +105,20 @@ let inlineStatement () = X<unit>
 
 [<Inline "inlineStatementTest1 = true; inlineStatementTest2 = true;">]
 let inlineStatements () = X<unit>
+
+[<Inline("$you_should_NOT_see_this + $you_should_see_this + $you_should_see_this_too")>]
+let inline unmarkedDollarInlines (you_should_NOT_see_this: int) = X<unit>
+
+[<Inline("$x + $you_should_NOT_see_this + $you_should_NOT_see_this_either",
+         UsingDollarVariables = "$you_should_NOT_see_this, you_should_NOT_see_this_either")>]
+let inline markedDollarInlines (x: int) = X<unit>
+
+[<Direct("$you_should_NOT_see_this + $you_should_see_this + $you_should_see_this_too")>]
+let inline unmarkedDollarDirects (you_should_NOT_see_this: int) = X<unit>
+
+[<Direct("$x + $you_should_NOT_see_this + $you_should_NOT_see_this_either",
+         UsingDollarVariables = "$you_should_NOT_see_this, you_should_NOT_see_this_either")>]
+let inline markedDollarDirects (x: int) = X<unit>
 
 [<JavaScript>]
 let InnerGenerics pred l =
@@ -501,5 +517,70 @@ let Tests =
             equal ModuleValues.b 2
             equal mA 1
             equal mB 2            
+        }
+
+        Test "ValueOption" {
+            raises ValueNone.Value
+            equalMsg (ValueSome(1).Value) 1 "ValueOption.Value"
+        }
+
+        Test "Reserved global identifiers" {
+            isTrue (
+                let self = 10
+                let window = 20
+                self = 10 && window = 20 && self + window = 30 && JS.Global :? WebSharper.JavaScript.Window
+            )
+        }
+
+        Test "Anonymous records" {
+            let x = IM.AnonRecord({| A = 42 |})
+            equal x.B 42
+            equal {| x with C = 3|} (New ["B" => 42; "C" => 3])
+            let a, b = 
+                match IM.AnonRecordInUnion() with
+                | IM.AnonRecordTest r -> r.A, r.B
+            equal a 3
+            equal b "hi"
+            equal {| A = 1; B = ValueNone; C = ValueSome 3 |} (New ["A" => 1; "C" => 3])
+            equal {| A = 1; B = None; C = Some 3 |} (New ["A" => 1; "C" => 3])
+            let s = struct {| A = 5 |}
+            equal s.A 5
+        }
+
+        Test "Implicit yield" {
+            let l =
+                [
+                    1 
+                    if true then
+                        2
+                    3
+                ]
+            equal l [1; 2; 3]
+        }
+
+        Test "OptimizedClosures" {
+            let f2 = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(fun a b -> a + b)
+            let f3 = OptimizedClosures.FSharpFunc<_,_,_,_>.Adapt(fun a b c -> a + b + c)
+            let f4 = OptimizedClosures.FSharpFunc<_,_,_,_,_>.Adapt(fun a b c d -> a + b + c + d)
+            let f5 = OptimizedClosures.FSharpFunc<_,_,_,_,_,_>.Adapt(fun a b c d e -> a + b + c + d + e)
+            equal (f2.Invoke(1) 2) 3
+            equal (f2.Invoke(1, 2)) 3
+            equal (f3.Invoke(1) 2 3) 6
+            equal (f3.Invoke(1, 2, 3)) 6
+            equal (f4.Invoke(1) 2 3 4) 10
+            equal (f4.Invoke(1, 2, 3, 4)) 10
+            equal (f5.Invoke(1) 2 3 4 5) 15
+            equal (f5.Invoke(1, 2, 3, 4, 5)) 15
+        }
+
+        Test "LanguagePrimitives" {
+            equal LanguagePrimitives.GenericZero 0
+            equal LanguagePrimitives.GenericOne 1
+            equal (LanguagePrimitives.FastGenericComparer<int>.Compare(1, 2)) -1
+        }
+
+        Test "Proxy project" {
+            equal (ProxyProjectTest.Functions.add 1 2) 3
+            isTrue (ProxyProjectTest.Functions.isJS())
         }
     }

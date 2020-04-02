@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -37,6 +38,7 @@
     <Compile Include="Remoting.fs" />
     <Compile Include="Unpacking.fs" />
     <Compile Include="Interop.fs" />
+    <Compile Include="TypedJson.fs" />
     <None Include="genInterop.fsx" />
     <None Include="paket.references" />
   </ItemGroup>

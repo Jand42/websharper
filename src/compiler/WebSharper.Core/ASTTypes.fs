@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -336,6 +336,12 @@ module Definitions =
             FullName = "System.Boolean"
         }
 
+    let Char =
+        TypeDefinition {
+            Assembly = "netstandard"
+            FullName = "System.Char"
+        }
+
     let UInt8 =
         TypeDefinition {
             Assembly = "netstandard"
@@ -416,7 +422,25 @@ module Definitions =
             Assembly = "FSharp.Core"
             FullName = "Microsoft.FSharp.Core.FSharpChoice`" + string arity
         }
+    
+    let Decimal =
+        TypeDefinition {
+            Assembly = "netstandard"
+            FullName = "System.Decimal"
+        }
 
+    let FSharpOption =
+        TypeDefinition {
+            Assembly = "FSharp.Core"
+            FullName = "Microsoft.FSharp.Core.FSharpOption`1"
+        }
+    
+    let FSharpValueOption =
+        TypeDefinition {
+            Assembly = "FSharp.Core"
+            FullName = "Microsoft.FSharp.Core.FSharpValueOption`1"
+        }
+    
 /// Stores a definition and type parameter information
 type Concrete<'T> =
     {
@@ -516,15 +540,25 @@ and Type =
         | ByRefType t -> t.TypeDefinition
         | VoidType -> Definitions.Unit
 
-    member this.SubstituteGenerics (gs : Type[]) =
+    member this.SubstituteGenerics (gs : Type[], ?staticOnly) =
         match this with 
-        | ConcreteType t -> ConcreteType { t with Generics = t.Generics |> List.map (fun p -> p.SubstituteGenerics gs) }
-        | TypeParameter i
-        | StaticTypeParameter i -> if gs.Length > i then gs.[i] else this
-        | ArrayType (t, i) -> ArrayType (t.SubstituteGenerics gs, i)
-        | TupleType (ts, v) -> TupleType (ts |> List.map (fun p -> p.SubstituteGenerics gs), v) 
-        | FSharpFuncType (a, r) -> FSharpFuncType (a.SubstituteGenerics gs, r.SubstituteGenerics gs)
-        | ByRefType t -> ByRefType (t.SubstituteGenerics gs)
+        | ConcreteType t -> ConcreteType { t with Generics = t.Generics |> List.map (fun p -> p.SubstituteGenerics(gs, ?staticOnly = staticOnly)) }
+        | TypeParameter i ->
+            if staticOnly.IsSome && staticOnly.Value then
+                this
+            elif gs.Length > i then 
+                gs.[i] 
+            else 
+                failwithf "Error during generic substitution, index %d, types: %A" i (gs |> Seq.map string |> String.concat ";")
+        | StaticTypeParameter i ->
+            if gs.Length > i then 
+                gs.[i] 
+            else 
+                failwithf "Error during generic substitution, index %d, types: %A" i (gs |> Seq.map string |> String.concat ";")
+        | ArrayType (t, i) -> ArrayType (t.SubstituteGenerics(gs, ?staticOnly = staticOnly), i)
+        | TupleType (ts, v) -> TupleType (ts |> List.map (fun p -> p.SubstituteGenerics(gs, ?staticOnly = staticOnly)), v) 
+        | FSharpFuncType (a, r) -> FSharpFuncType (a.SubstituteGenerics(gs, ?staticOnly = staticOnly), r.SubstituteGenerics(gs, ?staticOnly = staticOnly))
+        | ByRefType t -> ByRefType (t.SubstituteGenerics(gs, ?staticOnly = staticOnly))
         | VoidType -> this
         | LocalTypeParameter -> ConcreteType { Entity = Definitions.Object; Generics = [] }
 
@@ -589,17 +623,46 @@ and Type =
         | StaticTypeParameter _ 
         | LocalTypeParameter -> this
 
-    static member IsGenericCompatible(t1, t2) =
-        match t1, t2 with
-        | (StaticTypeParameter _ | LocalTypeParameter | TypeParameter _), _
-        | _, (StaticTypeParameter _ | LocalTypeParameter | TypeParameter _) ->
-            true
-        | ConcreteType t1, ConcreteType t2 -> t1.Entity = t2.Entity && t1.Generics.Length = t2.Generics.Length && List.forall2 (fun a b -> Type.IsGenericCompatible(a, b)) t1.Generics t2.Generics
-        | ArrayType (t1, r1), ArrayType (t2, r2) -> r1 = r2 && Type.IsGenericCompatible(t1, t2)
-        | TupleType (t1, s1), TupleType (t2, s2) -> s1 = s2 && t1.Length = t2.Length && List.forall2 (fun a b -> Type.IsGenericCompatible(a, b)) t1 t2 
-        | FSharpFuncType (a1, r1), FSharpFuncType (a2, r2) -> Type.IsGenericCompatible(a1, a2) && Type.IsGenericCompatible(r1, r2)
-        | ByRefType t1, ByRefType t2 -> Type.IsGenericCompatible(t1, t2)
-        | VoidType, VoidType -> true
+    member this.MapTypeDefinitions(mapping) =
+        match this with 
+        | ConcreteType t -> 
+            ConcreteType { 
+                Generics = t.Generics |> List.map (fun p -> p.MapTypeDefinitions mapping)
+                Entity = mapping t.Entity 
+            }
+        | TypeParameter i
+        | StaticTypeParameter i -> this
+        | ArrayType (t, i) -> ArrayType (t.MapTypeDefinitions mapping, i)
+        | TupleType (ts, v) -> TupleType (ts |> List.map (fun p -> p.MapTypeDefinitions mapping), v) 
+        | FSharpFuncType (a, r) -> FSharpFuncType (a.MapTypeDefinitions mapping, r.MapTypeDefinitions mapping)
+        | ByRefType t -> ByRefType (t.MapTypeDefinitions mapping)
+        | VoidType -> this
+        | LocalTypeParameter -> ConcreteType { Entity = Definitions.Object; Generics = [] }
+
+    static member IsGenericCompatible(targetSig, usageSig) =
+        let d = System.Collections.Generic.Dictionary() 
+        let rec isCompat t1 t2 =
+            match t1, t2 with
+            | (StaticTypeParameter i | TypeParameter i), t ->
+                match d.TryGetValue(i) with
+                | true, ts -> ts = t
+                | _ ->
+                    d.Add(i, t)
+                    true
+            | ConcreteType t1, ConcreteType t2 -> t1.Entity = t2.Entity && t1.Generics.Length = t2.Generics.Length && List.forall2 isCompat t1.Generics t2.Generics
+            | ArrayType (t1, r1), ArrayType (t2, r2) -> r1 = r2 && isCompat t1 t2
+            | TupleType (t1, s1), TupleType (t2, s2) -> s1 = s2 && t1.Length = t2.Length && List.forall2 isCompat t1 t2 
+            | FSharpFuncType (a1, r1), FSharpFuncType (a2, r2) -> isCompat a1 a2 && isCompat r1 r2
+            | ByRefType t1, ByRefType t2 -> isCompat t1 t2
+            | VoidType, VoidType -> true
+            | _ -> false
+        isCompat targetSig usageSig
+
+    member this.IsOptional =
+        match this with
+        | ConcreteType t ->
+            t.Entity = Definitions.FSharpOption 
+            || t.Entity = Definitions.FSharpValueOption 
         | _ -> false
 
 type MethodInfo =
@@ -619,6 +682,12 @@ type MethodInfo =
             else
                 "unit") 
             m.ReturnType
+
+    member this.SubstituteResolvedGenerics (gs : Type[]) =
+        { this with
+            Parameters = this.Parameters |> List.map (fun t -> t.SubstituteGenerics(gs))
+            ReturnType = this.ReturnType.SubstituteGenerics(gs)
+        }
 
 type Method = Hashed<MethodInfo>
 
@@ -648,7 +717,7 @@ type Address = Hashed<list<string>>
 module private Instances =
     let GlobalId =
         {
-            IdName = Some "window"
+            IdName = Some "self"
             Id = -1L
             Mutable = false
             Tuple = false
@@ -776,11 +845,11 @@ module Reflection =
 
     let LoadType (t: Type) =
         try System.Type.GetType(t.AssemblyQualifiedName, true)  
-        with _ -> failwithf "Failed to load type %s" t.AssemblyQualifiedName
+        with e -> failwithf "Failed to load type %s: %O" t.AssemblyQualifiedName e
 
     let LoadTypeDefinition (td: TypeDefinition) =
         try System.Type.GetType(td.Value.AssemblyQualifiedName, true)   
-        with _ -> failwithf "Failed to load type %s from assembly %s" td.Value.FullName td.Value.Assembly
+        with e -> failwithf "Failed to load type %s from assembly %s: %O" td.Value.FullName td.Value.Assembly e
 
     let [<Literal>] AllMethodsFlags = 
         System.Reflection.BindingFlags.Instance

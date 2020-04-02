@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -235,11 +235,15 @@ module SampleSite =
                     "Let us know how we can contact you" => ctx.Link Action.Contact
                     Elt("div", ClientSide <@ Client.Elt "b" [|Client.Text "It's working baby"|] @>)
                     Elt("div",
+                        Text """This should say 'Checking "attribute" encoding':""",
+                        Elt("input", Attr("placeholder", """Checking "attribute" encoding"""))
+                    )
+                    Elt("div",
                         ClientSide
                             <@ Client.Elt "i" [|
-                                Client.Text "It "
-                                Client.Elt "b" [|Client.Text "really"|]
-                                Client.Text " is!"
+                                Client.Text "On the "
+                                Client.Elt "b" [|Client.Text "client side"|]
+                                Client.Text " too!"
                             |] @>)
                 ]
 

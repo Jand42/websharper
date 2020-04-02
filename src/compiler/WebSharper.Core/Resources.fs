@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -22,28 +22,17 @@ module WebSharper.Core.Resources
 
 open System
 open System.IO
+open System.Net
 open System.Reflection
 open EmbeddedResourceNames
 
-#if NET461 // ASP.NET: HtmlTextWriter
-
-type private HTW = System.Web.UI.HtmlTextWriter
-
-type HtmlTextWriter =
-    inherit HTW
-    new(w: TextWriter, i: string) = { inherit HTW(w, i) }
-    new(w: TextWriter) = { inherit HTW(w) }
-
-#else
+module CT = ContentTypes
     
 type HtmlTextWriter(w: TextWriter, indentString: string) =
     inherit System.IO.TextWriter(w.FormatProvider)
 
     let mutable tagStack = System.Collections.Generic.Stack()
     let currentAttributes = ResizeArray()
-
-    let encodeText (text: string) =
-        text // TODO dotnet: do encode
 
     new (w) = new HtmlTextWriter(w, "\t")
 
@@ -87,18 +76,21 @@ type HtmlTextWriter(w: TextWriter, indentString: string) =
         this.Write(">")
 
     member this.WriteEncodedText(text: string) =
-        this.Write(encodeText text)
-        
+        WebUtility.HtmlEncode(text, w)
+
     member this.AddAttribute(name: string, value: string) =
         currentAttributes.Add(struct (name, value))
 
     member this.WriteAttribute(name: string, value: string) =
-        this.WriteAttribute(name, value, false)
+        this.WriteAttribute(name, value, true)
 
-    member this.WriteAttribute(name: string, value: string, encoded: bool) =
-        this.Write(" {0}=\"{1}\"", name, encodeText value)
-
-#endif
+    member this.WriteAttribute(name: string, value: string, encode: bool) =
+        this.Write(" {0}=\"", name)
+        if encode then
+            WebUtility.HtmlEncode(value, w)
+        else
+            w.Write(value)
+        this.Write("\"")
 
     static member SelfClosingTagEnd = " />"
 
@@ -130,7 +122,26 @@ type HtmlTextWriter(w: TextWriter, indentString: string) =
             "wbr"
         ]
 
-module CT = ContentTypes
+    member this.WriteStartCode(scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool) =
+        let includeScriptTag = defaultArg includeScriptTag true
+        let skipAssemblyDir = defaultArg skipAssemblyDir false
+        if includeScriptTag then
+            this.WriteLine("""<script type="{0}">""", CT.Text.JavaScript.Text)
+        this.WriteLine """if (typeof IntelliFactory !=='undefined') {"""
+        match scriptBaseUrl with
+        | Some url -> this.WriteLine("""  IntelliFactory.Runtime.ScriptBasePath = '{0}';""", url)
+        | None -> ()
+        if skipAssemblyDir then
+            this.WriteLine("""  IntelliFactory.Runtime.ScriptSkipAssemblyDir = true;""")
+        this.WriteLine """  IntelliFactory.Runtime.Start();"""
+        this.WriteLine """}"""
+        if includeScriptTag then
+            this.WriteLine("""</script>""")
+
+    static member WriteStartCode(writer: TextWriter, scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool) =
+        writer.WriteLine()
+        use w = new HtmlTextWriter(writer)
+        w.WriteStartCode(scriptBaseUrl, ?includeScriptTag = includeScriptTag, ?skipAssemblyDir = skipAssemblyDir)
 
 type Rendering =
     | RenderInline of string
@@ -155,6 +166,7 @@ type Context =
     {
         DebuggingEnabled : bool
         DefaultToHttp : bool
+        ScriptBaseUrl : option<string>
         //GetResourceHash : string * string -> int
         GetAssemblyRendering : string -> Rendering
         GetSetting : string -> option<string>
@@ -169,6 +181,10 @@ and IResource =
 
 type IDownloadableResource =
     abstract Unpack : string -> unit    
+
+type IExternalScriptResource =
+    inherit IResource
+    abstract member Urls : Context -> string[]
 
 let cleanLink dHttp (url: string) =
     if dHttp && url.StartsWith("//")
@@ -334,10 +350,11 @@ let tryFindWebResource (t: Type) (spec: string) =
     |> Seq.tryFind ok
 
 let tryGetUriFileName (u: string) =
-    try
-        let parts = u.Split('/')
-        parts.[parts.Length - 1] |> Some
-    with _ -> None
+    if u.StartsWith "http:" || u.StartsWith "https:" || u.StartsWith "//" then
+        let parts = u.Split([| '/' |], StringSplitOptions.RemoveEmptyEntries)
+        Array.tryLast parts
+    else
+        None
 
 let EmptyResource =
    { new IResource with member this.Render _ = ignore }
@@ -355,6 +372,44 @@ type BaseResource(kind: Kind) as this =
 
     member this.GetLocalName() =
         name.Replace('+', '.').Split('`').[0]
+
+    interface IExternalScriptResource with
+        member this.Urls ctx =
+            let dHttp = ctx.DefaultToHttp
+            let isLocal = ctx.GetSetting "UseDownloadedResources" |> Option.exists (fun s -> s.ToLower() = "true")
+            let localFolder f =
+                ctx.WebRoot +  "Scripts/WebSharper/" + this.GetLocalName() + "/" + f
+            match kind with
+            | Basic spec ->
+                if spec.EndsWith ".css" then [||] else
+                match ctx.GetSetting name with
+                | Some url -> [|url|]
+                | None ->
+                    match tryFindWebResource self spec with
+                    | Some _ -> [||]
+                    | None ->
+                        if isLocal then
+                            match tryGetUriFileName spec with
+                            | Some f -> [|localFolder f|]
+                            | _ -> [|spec|]
+                        else
+                            [|spec|]
+            | Complex (b, xs) ->
+                let b = defaultArg (ctx.GetSetting name) b
+                let urls =
+                    xs |> List.choose (fun x ->
+                        let url = b.TrimEnd('/') + "/" + x.TrimStart('/')
+                        if url.EndsWith ".css" then None else Some url
+                    )
+                let urls = 
+                    if isLocal then 
+                        urls |> List.map (fun u ->
+                            match tryGetUriFileName u with
+                            | Some f -> localFolder f
+                            | None -> u
+                        )
+                    else urls
+                urls |> Array.ofList
     
     interface IResource with
         member this.Render ctx =
@@ -376,7 +431,7 @@ type BaseResource(kind: Kind) as this =
                             if isLocal then
                                 match tryGetUriFileName spec with
                                 | Some f ->
-                                    RenderLink (localFolder (mt = Css)  f)
+                                    RenderLink (localFolder (mt = Css) f)
                                 | _ ->
                                     RenderLink spec
                             else
@@ -407,33 +462,37 @@ type BaseResource(kind: Kind) as this =
 
     interface IDownloadableResource with
         member this.Unpack path =
-            use wc = new System.Net.WebClient()    
-            let localName = this.GetLocalName()
-            let cssDir = Path.Combine (path, "Content", "WebSharper", localName)
-            let jsDir = Path.Combine (path, "Scripts", "WebSharper", localName)
-            let download (url: string) =
-                match tryGetUriFileName url with
-                | Some f ->
-                    let localDir = if url.EndsWith ".css" then cssDir else jsDir
-                    let localPath = Path.Combine(localDir, f)
-                    if not (Directory.Exists localDir) then
-                        Directory.CreateDirectory localDir |> ignore
-                    let url = if url.StartsWith("//") then "http:" + url else url
-                    printfn "Downloading %A to %s" url localPath
-                    let tempLocalPath = localPath + ".download"
-                    wc.DownloadFile(url, tempLocalPath)
-                    if File.Exists tempLocalPath then
-                        if File.Exists localPath then
-                            File.Delete localPath
-                        File.Move(tempLocalPath, localPath)
-                | _ ->
-                    ()
+            let download (paths: string list) =
+                let urls =
+                    paths |> List.choose (fun p ->
+                        let p = if p.StartsWith "//" then "http:" + p else p
+                        match Uri.TryCreate(p, UriKind.Absolute) with
+                        | true, uri when not uri.IsFile -> 
+                            tryGetUriFileName p |> Option.map (fun f -> uri, f)
+                        | _ -> None
+                    )
+                if List.isEmpty urls |> not then
+                    use wc = new System.Net.WebClient()    
+                    let localName = this.GetLocalName()
+                    let cssDir = Path.Combine (path, "Content", "WebSharper", localName)
+                    let jsDir = Path.Combine (path, "Scripts", "WebSharper", localName)
+                    for url, f in urls do
+                        let localDir = if f.EndsWith ".css" then cssDir else jsDir
+                        let localPath = Path.Combine(localDir, f)
+                        if not (Directory.Exists localDir) then
+                            Directory.CreateDirectory localDir |> ignore
+                        printfn "Downloading %A to %s" url localPath
+                        let tempLocalPath = localPath + ".download"
+                        wc.DownloadFile(url, tempLocalPath)
+                        if File.Exists tempLocalPath then
+                            if File.Exists localPath then
+                                File.Delete localPath
+                            File.Move(tempLocalPath, localPath)
             match kind with
             | Basic spec ->
-                download spec
+                download [ spec ]
             | Complex (b, xs) ->
-                for x in xs do
-                    download (b.TrimEnd('/') + "/" + x.TrimStart('/'))
+                download (xs |> List.map (fun x -> b.TrimEnd('/') + "/" + x.TrimStart('/')))
 
 [<Sealed>]
 type Runtime() =

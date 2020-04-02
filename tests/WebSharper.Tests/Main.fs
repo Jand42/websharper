@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -27,7 +27,9 @@ open WebSharper.Testing
 do()
 
 [<JavaScript>]
-let RunTests() =
+let RunTests runServerSide autoStart =
+    if not autoStart then
+        JavaScript.JS.Inline "QUnit.config.autostart = false";
     Test "non-categorized test" {
         equal 1 1
     }
@@ -38,6 +40,7 @@ let RunTests() =
         Async.Tests
         Basis.Tests
         Char.Tests
+        Conversions.Tests
         DateTime.Tests
         DateTime.NativeTests
         Delegate.Tests
@@ -52,13 +55,16 @@ let RunTests() =
         List.Tests
         Macro.Tests
         Math.Tests
+        MathJS.Tests runServerSide
         Nullable.Tests
         Object.Tests
         ObjExpr.Tests
         Operators.Tests
         Option.Tests
         Optimizations.Tests
+        Promise.Tests
         Proxy.Tests
+        Collections.Tests
         Queue.Tests
         Query.Tests
         Random.Tests
@@ -71,11 +77,12 @@ let RunTests() =
         String.Tests
         Task.Tests
         TimeSpan.Tests
+        ValueOption.Tests
         Printf.Tests
         Tupled.Tests
         WIG.Tests
         Cookies.Tests
 #if NET461
-        Compiler.Tests
+        (if runServerSide then Compiler.Tests else TestCategory "Compiler" { do () })
 #endif
     |]

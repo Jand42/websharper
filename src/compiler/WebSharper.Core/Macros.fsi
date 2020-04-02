@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -46,6 +46,16 @@ type Range =
 [<Sealed>]
 type Conversion =
     new : unit -> Conversion
+    inherit Macro
+
+[<Sealed>]
+type Abs =
+    new : unit -> Abs
+    inherit Macro
+
+[<Sealed>]
+type Sign =
+    new : unit -> Sign
     inherit Macro
 
 [<Sealed>]
@@ -149,3 +159,10 @@ type Tuple =
 type TupleExtensions =
     new : unit -> TupleExtensions
     inherit Macro
+
+[<Sealed>]
+type WebWorker =
+    new : unit -> WebWorker
+    inherit Macro
+
+val UncheckedEquals : AST.Expression -> AST.Expression -> AST.Expression

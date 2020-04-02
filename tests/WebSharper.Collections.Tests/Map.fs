@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -180,4 +180,18 @@ let Tests =
             equal (Map.tryPick finder (Map.remove 5 m)) None
         }
 
+        Test "TryGetValue" {
+            let findList = [None; None; Some 4; None]
+            let m = Map.ofList [(1, 5); (2, 9); (3, 6); (4, 13); (5, 5); (6, 9)]
+            let wasFound, found = m.TryGetValue(2)
+            let notFound, _ = m.TryGetValue(8)
+            isTrue wasFound
+            equal found 9
+            isFalse notFound
+        }
+
+        Test "Construction" {
+            equal (Map Seq.empty) Map.empty
+            equal (Map [("A",1); ("B",2); ("A",3)]) (Map [("A",3); ("B",2)])
+        }
     }

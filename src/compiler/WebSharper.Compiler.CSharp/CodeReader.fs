@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -187,7 +187,8 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
         { new A.AttributeReader<Microsoft.CodeAnalysis.AttributeData>() with
             override this.GetAssemblyName attr = attr.AttributeClass |> getContainingAssemblyName
             override this.GetName attr = attr.AttributeClass.Name
-            override this.GetCtorArgs attr = attr.ConstructorArguments |> Seq.map getTypedConstantValue |> Array.ofSeq          
+            override this.GetCtorArgs attr = attr.ConstructorArguments |> Seq.map getTypedConstantValue |> Array.ofSeq
+            override this.GetNamedArgs attr = attr.NamedArguments |> Seq.map (fun (KeyValue(n, v)) -> n, getTypedConstantValue v) |> Array.ofSeq
             override this.GetTypeDef o = self.ReadNamedTypeDefinition (o :?> INamedTypeSymbol)
         }
 
@@ -206,7 +207,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
     member this.ReadNamedTypeDefinition (x: INamedTypeSymbol) =
         let res =
             Hashed {
-                Assembly = getContainingAssemblyName x
+                Assembly = comp.FindProxiedAssembly(getContainingAssemblyName x)
                 FullName = getTypeFullName x
             }
 
@@ -231,16 +232,19 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
         let ta = getTypeArguments x |> List.ofSeq
         let td = this.ReadNamedTypeDefinition x
         let tName = td.Value.FullName
-        let getTupleType isValue =
+        if tName.StartsWith "System.Tuple" then
             if tName.EndsWith "8" then
                 match ta.[7] with
-                | TupleType (rest, _) -> TupleType (ta.[.. 6] @ rest, isValue)
+                | TupleType (rest, _) -> TupleType (ta.[.. 6] @ rest, false)
                 | _ -> failwith "invalid big tuple type" 
-            else TupleType (ta, isValue)
-        if tName.StartsWith "System.Tuple" then
-            getTupleType false
+            else TupleType (ta, false)
         elif tName.StartsWith "System.ValueTuple" then
-            getTupleType true
+            let te = x.TupleElements |> Seq.map (fun f -> this.ReadType f.Type) |> List.ofSeq
+            if tName.EndsWith "8" then
+                match te.[7] with
+                | TupleType (rest, _) -> TupleType (te.[.. 6] @ rest, true)
+                | _ -> failwith "invalid big tuple type" 
+            else TupleType (te, true)
         elif tName = "Microsoft.FSharp.Core.FSharpFunc`2" then
             match ta with
             | [a; r] -> FSharpFuncType(a, r)
@@ -290,6 +294,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
             ReturnType = x.ReturnType |> this.ReadType
             Generics = x.Arity
         }
+        |> comp.ResolveProxySignature
 
     member this.ReadGenericMethod (x: IMethodSymbol) =
         let ma = x.TypeArguments |> Seq.map this.ReadType |> List.ofSeq
@@ -300,6 +305,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
         Hashed {
             CtorParameters = this.ReadParameterTypes x
         }
+        |> comp.ResolveProxySignature
 
     member this.ReadMember (x: IMethodSymbol) =
         let name = x.Name
@@ -329,6 +335,7 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
             else
                 let o = x.OriginalDefinition
                 Member.Method (not o.IsStatic, getMeth o)
+        |> comp.ResolveProxySignature
 
     member this.ReadParameter (x: IParameterSymbol) : CSharpParameter =
         let typ = this.ReadType x.Type
@@ -591,7 +598,11 @@ type RoslynTransformer(env: Environment) =
             | _ -> This
             |> Some
         match symbol with
-        | :? ILocalSymbol as s -> Var env.Vars.[s]
+        | :? ILocalSymbol as s -> 
+            if s.IsRef then
+                GetRef (Var env.Vars.[s])     
+            else
+                Var env.Vars.[s]
         | :? IParameterSymbol as p -> 
             match env.Parameters.[p] with
             | v, false -> Var v
@@ -643,7 +654,7 @@ type RoslynTransformer(env: Environment) =
                 | ExpressionData.MakeRefExpression                 _ -> NotSupported "__makeref"
                 | ExpressionData.RefTypeExpression                 _ -> NotSupported "__reftype"
                 | ExpressionData.RefValueExpression                _ -> NotSupported "__refvalue"
-                | ExpressionData.CheckedExpression                 _ -> NotSupported "checked"
+                | ExpressionData.CheckedExpression                 x -> this.TransformCheckedExpression x
                 | ExpressionData.DefaultExpression                 x -> this.TransformDefaultExpression x
                 | ExpressionData.TypeOfExpression                  _ -> NotSupported "typeof"
                 | ExpressionData.SizeOfExpression                  _ -> NotSupported "sizeof"
@@ -657,6 +668,7 @@ type RoslynTransformer(env: Environment) =
                 | ExpressionData.AnonymousObjectCreationExpression x -> this.TransformAnonymousObjectCreationExpression x
                 | ExpressionData.ArrayCreationExpression           x -> this.TransformArrayCreationExpression x
                 | ExpressionData.ImplicitArrayCreationExpression   x -> this.TransformImplicitArrayCreationExpression x
+                | ExpressionData.ImplicitStackAllocArrayCreationExpression _
                 | ExpressionData.StackAllocArrayCreationExpression _ -> NotSupported "stackalloc"
                 | ExpressionData.QueryExpression                   x -> this.TransformQueryExpression x
                 | ExpressionData.OmittedArraySizeExpression        _ -> failwith "not a general expression: OmittedArraySizeExpression"
@@ -773,9 +785,10 @@ type RoslynTransformer(env: Environment) =
             )
         let expression = x.Expression |> this.TransformExpression
         let value =
-            match x.RefOrOutKeyword with
-            | Some ArgumentRefOrOutKeyword.RefKeyword 
-            | Some ArgumentRefOrOutKeyword.OutKeyword ->
+            match x.RefKindKeyword with
+            | Some ArgumentRefKindKeyword.RefKeyword 
+            | Some ArgumentRefKindKeyword.OutKeyword
+            | Some ArgumentRefKindKeyword.InKeyword ->
                 createRef expression
             | None ->
                 // TODO: copy struct values, if support for mutable structs on the client-side is added
@@ -813,7 +826,7 @@ type RoslynTransformer(env: Environment) =
             | StatementData.ForStatement              x -> this.TransformForStatement x
             | StatementData.UsingStatement            x -> this.TransformUsingStatement x
             | StatementData.FixedStatement            _ -> NotSupported "fixed"
-            | StatementData.CheckedStatement          _ -> NotSupported "checked"
+            | StatementData.CheckedStatement          x -> this.TransformCheckedStatement x
             | StatementData.UnsafeStatement           _ -> NotSupported "unsafe"
             | StatementData.LockStatement             _ -> NotSupported "lock"
             | StatementData.IfStatement               x -> this.TransformIfStatement x
@@ -1154,7 +1167,12 @@ type RoslynTransformer(env: Environment) =
             | FieldGet (obj, ty, f) -> FieldSet (obj, ty, f, right)
             | ItemGet(obj, i, _) -> ItemSet (obj, i, right)
             | Application(ItemGet (r, Value (String "get"), _), [], _, _) ->
-                withResultValue right <| SetRef r
+                // when right is also a ref, this is a ref local set
+                match r, right with
+                | Var id, Object [ "get", (Function ([], Return getVal)); "set", (Function ([_], ExprStatement _)) ] ->
+                    VarSet(id, right)
+                | _ ->
+                    withResultValue right <| SetRef r
             | Call (thisOpt, typ, getter, args) ->
                 withResultValue right <| fun rv -> Call (thisOpt, typ, setterOf getter, args @ [rv])
             | e -> 
@@ -1255,17 +1273,31 @@ type RoslynTransformer(env: Environment) =
             let leftType = env.SemanticModel.GetTypeInfo(x.Left.Node).ConvertedType |> sr.ReadType
             Coalesce(left, leftType, right)
         | _ -> 
-            let symbol = env.SemanticModel.GetSymbolInfo(x.Node).Symbol :?> IMethodSymbol
-            let typ, meth = getTypeAndMethod symbol
-            if List.isEmpty meth.Generics then
-                // add fake generics type information to resolve nullable operations
-                let leftType = env.SemanticModel.GetTypeInfo(x.Left.Node).Type |> sr.ReadType
-                let rightType = env.SemanticModel.GetTypeInfo(x.Right.Node).Type |> sr.ReadType
-                let meth =
-                    { meth with Generics = [leftType; rightType] }
-                Call(None, typ, meth, [left; right])
-            else
-                Call(None, typ, meth, [left; right])
+            let leftTypeSymbol = env.SemanticModel.GetTypeInfo(x.Left.Node).Type
+            let rightTypeSymbol = env.SemanticModel.GetTypeInfo(x.Right.Node).Type
+            let tupleOp =
+                if leftTypeSymbol.IsTupleType && rightTypeSymbol.IsTupleType then
+                    match x.Kind with
+                    | BinaryExpressionKind.EqualsExpression ->
+                        Some (Macros.UncheckedEquals left right)   
+                    | BinaryExpressionKind.NotEqualsExpression ->
+                        Some (Unary(UnaryOperator.``!``, Macros.UncheckedEquals left right))                       
+                    | _ -> None
+                else None
+            match tupleOp with
+            | Some res -> res
+            | _ ->
+                let symbol = env.SemanticModel.GetSymbolInfo(x.Node).Symbol :?> IMethodSymbol
+                let typ, meth = getTypeAndMethod symbol
+                if List.isEmpty meth.Generics then
+                    // add fake generics type information to resolve nullable operations
+                    let leftType = leftTypeSymbol |> sr.ReadType
+                    let rightType = rightTypeSymbol |> sr.ReadType
+                    let meth =
+                        { meth with Generics = [leftType; rightType] }
+                    Call(None, typ, meth, [left; right])
+                else
+                    Call(None, typ, meth, [left; right])
         |> withExprSourcePos x.Node
 
     member this.TransformConditionalExpression (x: ConditionalExpressionData) : Expression =
@@ -2234,3 +2266,9 @@ type RoslynTransformer(env: Environment) =
             | _ -> 
                 let f = "{0" + Option.defaultValue "" align +  Option.defaultValue "" format + "}" 
                 Call(None, NonGeneric Definitions.String, NonGeneric Definitions.StringFormat1, [ Value (String f); expr ])
+
+    member this.TransformCheckedStatement (x: CheckedStatementData) : _ =
+        this.TransformBlock x.Block
+
+    member this.TransformCheckedExpression (x: CheckedExpressionData) : _ =
+        this.TransformExpression x.Expression

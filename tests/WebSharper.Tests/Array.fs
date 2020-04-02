@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -642,8 +642,6 @@ let Tests =
             equal x 2 
         }
 
-        #if FSHARP40
-
         Test "Array.contains" {
             isTrue (Array.contains 0 [| 0 .. 4 |])
         }
@@ -683,6 +681,11 @@ let Tests =
         Test "Array.exactlyOne" {
             equal (Array.exactlyOne [| 0 |]) 0
             raises (Array.exactlyOne [| 0; 1 |])
+        }
+
+        Test "Array.tryExactlyOne" {
+            equal (Array.tryExactlyOne [| 0 |]) (Some 0)
+            equal (Array.tryExactlyOne [| 0; 1 |]) None
         }
 
         Test "Array.except" {
@@ -859,6 +862,8 @@ let Tests =
             equal (Array.tail [| 1 .. 3|]) [| 2; 3 |]
         }
 
-        #endif
-
+        Test "Array.transpose" {
+            raises (Array.transpose [|[|1|]; [| |]|])
+            equal (Array.transpose [|[|1; 2|]; [|3; 4|]|]) [|[|1; 3|]; [|2; 4|]|]
+        }
     }

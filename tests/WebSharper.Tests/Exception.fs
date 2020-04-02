@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -95,6 +95,14 @@ let Tests =
                     | E0 -> 2
                     | _ -> 0
             ) ("OOPS", 2)            
+        }
+
+        Test "Inheritance" {
+            isTrue (box (System.ArgumentException()) :? exn)
+            isTrue (box E0 :? exn)
+            isTrue (box (E1 42) :? exn)
+            isTrue (box (E2(10, "a")) :? exn)
+            isTrue (box (E3("a")) :? exn)
         }
 
     }

@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -525,8 +525,6 @@ let Tests =
             equal fibonacci [2; 3; 5; 8; 13]
         }
 
-        #if FSHARP40
-
         Test "List.contains" {
             isTrue (List.contains 0 [ 0 .. 4 ])
         }
@@ -566,6 +564,11 @@ let Tests =
         Test "List.exactlyOne" {
             equal (List.exactlyOne [ 0 ]) 0
             raises (List.exactlyOne [ 0; 1 ])
+        }
+
+        Test "List.tryExactlyOne" {
+            equal (List.tryExactlyOne [ 0 ]) (Some 0)
+            equal (List.tryExactlyOne [ 0; 1 ]) None
         }
 
         Test "List.except" {
@@ -717,6 +720,8 @@ let Tests =
             equal [ 0 .. 4].[.. 2] [ 0 .. 2 ]
         }
 
-        #endif
-
+        Test "List.transpose" {
+            raises (List.transpose [[1]; []])
+            equal (List.transpose [[1; 2]; [3; 4]]) [[1; 3]; [2; 4]]
+        }
     }

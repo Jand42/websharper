@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -58,6 +58,39 @@ let Tests =
 
             let! x =
                 Async.Parallel [|
+                    async { return 1 }
+                    async { return 2 }
+                |]
+            equal x [| 1; 2 |] 
+
+            let running = ref (0, 0) // currently running and maximum parallelism
+            let run i =
+                async {
+                    let (r, m) = !running
+                    running := (r + 1, max m (r + 1))
+                    do! Async.Sleep 500
+                    let (r, m) = !running
+                    running := (r - 1, m)
+                    return i
+                }
+
+            let! y =
+                Async.Parallel ([|
+                    run 1
+                    run 2
+                |], 1)
+            equal y [| 1; 2 |] 
+            equal !running (0, 1)
+
+            raises (Async.Parallel ([||], 0))
+        }
+
+        Test "Sequential" {
+            let! x = Async.Sequential (Array.empty<Async<int>>)
+            equal x [||]
+
+            let! x =
+                Async.Sequential [|
                     async { return 1 }
                     async { return 2 }
                 |]
@@ -210,6 +243,27 @@ let Tests =
             equal y 1
         }
 
+        Test "StartImmediateAsTask" {
+            let x, y, t =
+                let res = ref 0 
+                async {
+                    incr res 
+                }
+                |> Async.Start
+                let x = !res
+                let t =
+                    async {
+                        incr res 
+                        return 2
+                    }
+                    |> Async.StartImmediateAsTask
+                x, !res, t
+            equal x 0
+            equal y 1
+            isTrue t.IsCompleted
+            equal t.Result 2
+        }
+
         Test "StartWithContinuations" {
             let x =
                 let res = ref 0 
@@ -227,4 +281,22 @@ let Tests =
             equalAsync a 1
             equalAsync b 2
         }
+
+        Test "StartChildAsTask" { 
+            let! a = Async.StartChildAsTask (async.Return 1)
+            let! b = Async.StartChildAsTask (async.Return 2)
+            equalAsync (Async.AwaitTask a) 1
+            equalAsync (Async.AwaitTask b) 2
+        }
+
+        Test "Match!" {
+            let! x = 
+                async {
+                    match! async { return Some 1 } with
+                    | Some x -> return x
+                    | None -> return 0
+                }
+            equal x 1 
+        }
+
     }

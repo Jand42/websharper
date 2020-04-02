@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -123,7 +123,6 @@ type TestStruct =
 
     member this.X2 = this.X + 1
 
-#if FSHARP41
 [<JavaScript; Struct>]
 type StructUnion = SU of int
 
@@ -137,7 +136,6 @@ type StructRecord =
 [<JavaScript; Struct>]
 type StructRecord2 =
     { SR2 : int; SR2b : string }
-#endif
 
 [<CompilationRepresentation (CompilationRepresentationFlags.UseNullAsTrueValue)>]
 type U =
@@ -357,14 +355,10 @@ let Tests =
             equal Object.Prototype.Constructor.Length 1
         }
 
-        #if FSHARP40
-
         Test "isNull" {
             isTrue (isNull null)
             isFalse (isNull (obj()))
         }
-
-        #endif
 
         Test "Stub property" {
             let o = RN(Value = 1)
@@ -472,7 +466,6 @@ let Tests =
             equal ((b :?> I2).Get()) 2
         }
         
-        #if FSHARP41
         Test "Struct union" {
             let f x =
                 Console.Log "deconstructing struct union"
@@ -493,6 +486,5 @@ let Tests =
             equal y.SR2 1
             equal y.SR2b "a"
         }
-        #endif
 
     }

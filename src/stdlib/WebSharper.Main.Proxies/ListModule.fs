@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -417,10 +417,10 @@ let MinBy f (list: list<_>) =
     m
 
 [<Inline>]
-let Get (l: list<_>) ix = Seq.nth ix l
+let Get (l: list<_>) ix = Seq.item ix l
 
 [<Inline>]
-let Item ix (l: list<_>) = Seq.nth ix l
+let Item ix (l: list<_>) = Seq.item ix l
 
 [<Name "ofArray">]
 let OfArray<'T> (arr: 'T []) =
@@ -544,6 +544,11 @@ let ToArray (l: list<_>) = Array.ofList l
 
 [<Inline "$x">]
 let ToSeq<'T> (x: list<'T>) : seq<'T> = x :> _
+
+[<Name "transpose">]
+let Transpose (x: seq<list<'T>>) : list<list<'T>> =
+    ArrayTranspose (Array.ofSeq (x |> Seq.map Array.ofList))
+    |> Seq.map List.ofArray |> List.ofSeq
 
 [<Inline>]
 let TryFind p (l: list<_>) = Seq.tryFind p l
@@ -734,10 +739,18 @@ let TryLast<'T> (list: list<'T>) =
 [<Name "exactlyOne">]
 let ExactlyOne (list : 'T list) =
     match list with
-    | head :: [] ->
+    | [ head ] ->
         head
     | _ ->
         failwith "The input does not have precisely one element."
+
+[<Name "tryExactlyOne">]
+let TryExactlyOne (list : 'T list) =
+    match list with
+    | [ head ] ->
+        Some head
+    | _ ->
+        None
 
 [<Name "unfold">]
 let Unfold<'T, 'S> (f: 'S -> option<'T * 'S>) (s: 'S) : list<'T> =

@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -27,7 +27,7 @@ let GetSimpleTypeName (tdef: TypeDefinition) =
     let n = tdef.Value.FullName.Split('.', '+') |> Array.last
     n.Split('`').[0]
 
-let GetMethodInline (tAnnot: TypeAnnotation) (mAnnot: MemberAnnotation) isInstance (tdef: TypeDefinition) (mdef: Method) =
+let GetMethodInline (tAnnot: TypeAnnotation) (mAnnot: MemberAnnotation) isModuleValue isInstance (tdef: TypeDefinition) (mdef: Method) =
     let mutable error = None
     let mname, isGet, isSet =
         let mname = mdef.Value.MethodName
@@ -82,7 +82,7 @@ let GetMethodInline (tAnnot: TypeAnnotation) (mAnnot: MemberAnnotation) isInstan
                 errorPlaceholder, errorPlaceholder
             | Some (a, n) ->
                 Global a, Value (String n)
-        if isGet then
+        if isGet || isModuleValue then
             let a, n = propAddressAndName()
             ItemGet(a, n, NoSideEffect)
         elif isSet then

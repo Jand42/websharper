@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -518,8 +518,8 @@ let code =
                 | List (Tuple [Option Expr; Statement]) -> "\"[\" + String.concat \"; \" (List.map (fun (a, b) -> defaultArg (Option.map PrintExpression a) \"_\" + \", \" + PrintStatement b) " + x + ") + \"]\"" 
                 | List (Tuple [List (Option Expr); Statement]) -> "\"[\" + String.concat \"; \" (List.map (fun (a, b) -> \"[\" + String.concat \"; \" (List.map (fun aa -> defaultArg (Option.map PrintExpression aa) \"_\") a) + \"], \" + PrintStatement b) " + x + ") + \"]\""
                 | Object "TypeDefinition" -> x + ".Value.FullName"
-                | Object "Concrete<TypeDefinition>" -> x + ".Entity.Value.FullName"
-                | Object "Concrete<Method>" -> x + ".Entity.Value.MethodName"
+                | Object "Concrete<TypeDefinition>" -> x + ".Entity.Value.FullName + PrintGenerics " + x + ".Generics"
+                | Object "Concrete<Method>" -> x + ".Entity.Value.MethodName + PrintGenerics " + x + ".Generics"
                 | Object "Constructor" -> "\".ctor\""
                 | Object "Literal" -> "PrintObject " + x + ".Value"
                 | Object _ -> "PrintObject " + x

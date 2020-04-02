@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -164,6 +164,9 @@ let opUncheckedTy, equalsMeth, compareMeth, hashMeth =
         Reflection.ReadMethod cmi,
         Reflection.ReadMethod hmi
     | _ -> failwith "Expecting a Call pattern"
+
+let UncheckedEquals x y =
+    Call (None, NonGeneric opUncheckedTy, NonGeneric equalsMeth, [x; y]) 
 
 let makeComparison cmp x y =
     let eq x y = Call (None, NonGeneric opUncheckedTy, NonGeneric equalsMeth, [x; y]) 
@@ -424,7 +427,9 @@ type Char() =
                 let fromNum() = 
                     Application(Global ["String"; "fromCharCode"], [x], Pure, Some 1)
                     |> MacroOk
-                if isIn integralTypes t then fromNum() else
+                if isIn integralTypes t then 
+                    NumericConversion t.TypeDefinition Definitions.Char x |> MacroOk
+                else
                     match t with
                     | ConcreteType d ->
                         match d.Entity.Value.FullName with
@@ -487,7 +492,7 @@ type Conversion() =
         | TypeParameter _, OptNbleTypeDef tt ->
             let tn = tt.Value.FullName
             let warnAboutChar res =
-                MacroWarning ("Unsafe generic conversion for client-side, make sure input cannot be a char", MacroOk res)
+                MacroWarning ("Unsafe generic conversion for client-side, make sure input cannot be a char or decimal", MacroOk res)
             if integralTypes.Contains tn then
                 parseInt a |> withNbleSupport |> warnAboutChar
             elif scalarTypes.Contains tn then
@@ -497,6 +502,58 @@ type Conversion() =
             else
                 MacroError ("Conversion macro error: generic to " + tn)
         | f, t -> MacroError (sprintf "Conversion macro error: %O to %O" f t)
+
+[<Sealed>]
+type Abs() =
+    inherit Macro()
+    override this.TranslateCall(c) =
+        let m = c.Method
+        let x = c.Arguments.Head
+        let t = m.Generics.Head
+        if t.IsParameter then
+            MacroNeedsResolvedTypeArg t
+        else
+            match t with
+            | ConcreteType ct ->
+                if scalarTypes.Contains ct.Entity.Value.FullName then
+                    MacroFallback
+                else
+                    let absMeth =
+                        Method {
+                            MethodName = "Abs"
+                            Parameters = [t]
+                            ReturnType = t
+                            Generics = 0      
+                        }
+                    Call(None, ct, NonGeneric absMeth, [x]) |> MacroOk
+            | _ ->
+                MacroError (sprintf "Abs macro error, type not supported: %O" t)
+
+[<Sealed>]
+type Sign() =
+    inherit Macro()
+    override this.TranslateCall(c) =
+        let m = c.Method
+        let x = c.Arguments.Head
+        let t = m.Generics.Head
+        if t.IsParameter then
+            MacroNeedsResolvedTypeArg t
+        else
+            match t with
+            | ConcreteType ct ->
+                if scalarTypes.Contains ct.Entity.Value.FullName then
+                    MacroFallback
+                else
+                    let signMeth =
+                        Method {
+                            MethodName = "get_Sign"
+                            Parameters = []
+                            ReturnType = NonGenericType Definitions.Int
+                            Generics = 0      
+                        }
+                    Call(Some x, ct, NonGeneric signMeth, []) |> MacroOk
+            | _ ->
+                MacroError (sprintf "Sign macro error, type not supported: %O" t)
 
 [<Sealed>]
 type String() =
@@ -546,41 +603,22 @@ let listOfArrayDef =
         Generics = 1      
     }
 
-let getFieldsList q =
-    let ``is (=>)`` (td: TypeDefinition) (m: Method) =
-        td.Value.FullName = "WebSharper.JavaScript.Pervasives"
-        && m.Value.MethodName = "op_EqualsGreater"
-    let rec getFieldsListTC l q =
-        let trItem i =
-            match IgnoreExprSourcePos i with    
-            | NewArray [I.Value (String n); v] -> n, v 
-            | Call (_, td, m, [I.Value (String n); v])
-                when ``is (=>)`` td.Entity m.Entity -> n, v
-            | _ -> failwith "Wrong type of array passed to New"
-        match IgnoreExprSourcePos q with
-        | NewUnionCase (_, _, [I.NewArray [I.Value (String n); v]; t]) ->
-            getFieldsListTC ((n, v) :: l) t         
-        | NewUnionCase (_, _, [I.Call (_, td, m, [I.Value (String n); v]); t])
-            when ``is (=>)`` td.Entity m.Entity ->
-            getFieldsListTC ((n, v) :: l) t         
-        | NewUnionCase (_, _, []) -> Some (l |> List.rev) 
-        | Call(None, td, m, [ I.NewArray items ]) when td.Entity = listModuleDef && m.Entity = listOfArrayDef ->
-            items |> List.map trItem |> Some
-        | NewArray (items) ->
-            items |> List.map trItem |> Some
-        | _ -> None
-    getFieldsListTC [] q
-
 [<Sealed>]
 type New() =
     inherit Macro()
+    override this.NeedsTranslatedArguments = true
     override this.TranslateCall(c) =
         match c.Arguments with
-        | [x] -> 
-            match getFieldsList x with
-            | Some xl ->
-                MacroOk <| Object (xl |> List.map (fun (n, v) -> n, v))
-            | _ -> MacroFallback
+        | [I.NewArray items] ->
+            let items, isOk =
+                (true, items)
+                ||> List.mapFold (fun isOk item ->
+                    match isOk, item with
+                    | true, I.NewArray [I.Value (String key); e] -> (key, e), true
+                    | _ -> ("", NewArray []), false
+                )
+            if isOk then MacroOk (Object items) else MacroFallback
+        | [_] -> MacroFallback
         | _ -> MacroError "New macro Error"
 
 //type FST = Reflection.FSharpType
@@ -1201,15 +1239,17 @@ type InlineJS() =
     inherit Macro()
 
     override __.TranslateCall(c) =
-        match c.Arguments.Head with
-        | I.Value (String inl) ->
-            let args =
-                match c.Arguments with
-                | [_] -> [] 
-                | [_; I.NewArray args] -> args
-                | _ -> failwith "InlineJS error: arguments cannot be passed as an array"
-            c.Compilation.ParseJSInline(inl, args) |> MacroOk
-        | _ -> failwith "InlineJS error: first argument must be a constant string"
+        let inl, pos =
+            match c.Arguments.Head with
+            | Value (String inl) -> inl, Unchecked.defaultof<_>
+            | ExprSourcePos(pos, Value (String inl)) -> inl, pos
+            | _ -> failwith "InlineJS error: first argument must be a constant string"
+        let args =
+            match c.Arguments with
+            | [_] -> [] 
+            | [_; I.NewArray args] -> args
+            | _ -> failwith "InlineJS error: arguments cannot be passed as an array"
+        c.Compilation.ParseJSInline(inl, args, pos) |> MacroOk
 
 let stringTy, lengthMeth, padLeft, padRight =
     let t = typeof<System.String>
@@ -1348,3 +1388,34 @@ type TupleExtensions() =
             | [ x ] -> MacroOk x
             | _ -> MacroError "Expecting only a this argument for System.TupleExtensions.ToTuple/ToValueTuple"
         | n ->  MacroError ("Unrecognized method of System.TupleExtensions: " + n)
+
+[<Sealed>]
+type WebWorker() =
+    inherit Macro()
+
+    static let worker = NonGeneric <| Hashed { Assembly = "WebSharper.JavaScript"; FullName = "WebSharper.JavaScript.Worker" }
+    static let workerCtor = Hashed { CtorParameters = [NonGenericType stringTy] }
+
+    override __.TranslateCtor(c) =
+        let gen name expr includeJsExports =
+            let e =
+                match expr with
+                | Lambda([self], body) ->
+                    Let(self, Global[], body)
+                | e ->
+                    Application(e, [Global []], NonPure, Some 1)
+            // TODO: .min?
+            let filename = c.Compilation.AddBundle(name, ExprStatement e, includeJsExports).FileName
+            let path = 
+                Application(
+                    Global ["IntelliFactory"; "Runtime"; "ScriptPath"],
+                    [!~(Literal.String c.Compilation.AssemblyName); !~(Literal.String filename)],
+                    NonPure, Some 2)
+            Ctor(worker, workerCtor, [path])
+            |> MacroOk
+        match c.Arguments with
+        | [expr] -> gen "worker" expr false
+        | [I.Value (String name); expr] -> gen name expr false
+        | [I.Value (String name); I.Value (Bool includeJsExports); expr] -> gen name expr includeJsExports
+        | [x; expr] -> MacroError (sprintf "You must use a string literal as the name of a web worker: %A" x)
+        | _ -> MacroError "Invalid use of WebWorker macro"

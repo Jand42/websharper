@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -29,8 +29,8 @@ type CustomNumber(x: int) =
     let inner = x
 
     member this.Inner = inner
-    static member op_Multiply(CN1: CustomNumber, CN2: CustomNumber) =
-        CN1.Inner * CN2.Inner
+    static member op_Multiply(cn1: CustomNumber, cn2: CustomNumber) =
+        cn1.Inner * cn2.Inner
 
 
 [<Proxy(typeof<CustomNumber>)>]
@@ -43,7 +43,7 @@ type CN =
     member this.Inner = X<int>
 
     [<Inline "55">]
-    static member op_Multiply(CN1: CustomNumber, CN2: CustomNumber) = X<int>
+    static member op_Multiply(cn1: CustomNumber, cn2: CustomNumber) = X<int>
 
 
 [<JavaScript>]
@@ -251,5 +251,11 @@ let Tests =
             let u1 = CustomNumber(5)
             let u2 = CustomNumber(6)
             isTrue (u1*u2 = 55)
+        }
+
+        Test "lock" {
+            let x =
+                lock (obj()) (fun () -> 1 + 1)
+            equal x 2
         }
     }

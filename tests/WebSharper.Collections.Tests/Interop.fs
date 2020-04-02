@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -104,6 +104,17 @@ module Module =
     let ErasedUnion2 = JavaScript.Union<int, string>.Union2Of2 "hi"
     let UndefVal = JavaScript.Undefined : JavaScript.Optional<int>
     let DefVal = JavaScript.Defined 42
+
+    let AnonRecord (x: {| A : int |}) = {| B = x.A |}
+
+    type TAnonRecordInUnion =
+        | AnonRecordTest of {| A: int; B: string|}
+
+    let AnonRecordInUnion() =
+        AnonRecordTest {| A = 3; B = "hi"|}   
+
+    let AnonRecordNested() =
+        {| A = 1; B = {| A = 2; B = "hi"|}|}   
 
 [<JavaScript>]
 type GenericClass<'T>() =

@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -219,15 +219,19 @@ let erasedUnions =
         }
     )
 
-let smallIntegralTypes =
-    Set [
-        "System.Byte"
-        "System.SByte"
-        "System.Int16"
-        "System.Int32"
-        "System.UInt16"
-        "System.UInt32"
+let smallIntegralTypeSizes =
+    Map [
+        "System.Byte", (0L, 255L)
+        "System.SByte", (128L, 255L)
+        "System.UInt16", (0L, 65535L)
+        "System.Int16", (32768L, 65535L)
+        "System.UInt32", (0L, 4294967295L)
+        "System.Int32", (2147483648L, 4294967295L)
     ]
+
+let smallIntegralTypes =
+    smallIntegralTypeSizes
+    |> Map.toSeq |> Seq.map fst |> Set
 
 let bigIntegralTypes =
     Set [
@@ -253,35 +257,115 @@ let comparableTypes =
         "System.Char"
     ]
 
-let private (|SmallIntegralType|BigIntegralType|ScalarType|CharType|StringType|NonNumericType|) n =
-    if smallIntegralTypes.Contains n then SmallIntegralType
-    elif bigIntegralTypes.Contains n then BigIntegralType
+type private NumericTypeKind =
+    | SmallIntegralType of int64 * int64
+    | BigIntegralType
+    | ScalarType
+    | DecimalType
+    | CharType
+    | StringType
+    | NonNumericType        
+
+let private getNumericTypeKind n =
+    match smallIntegralTypeSizes |> Map.tryFind n with
+    | Some range -> SmallIntegralType range
+    | _ ->
+    if bigIntegralTypes.Contains n then BigIntegralType
     elif scalarTypes.Contains n then ScalarType
     elif n = "System.Char" then CharType
     elif n = "System.String" then StringType
+    elif n = "System.Decimal" then DecimalType
     else NonNumericType
 
+let private floatCtor =
+    Constructor { CtorParameters = [ NonGenericType Definitions.Float ] }
+
+let private parseDecimal =
+    Method {
+        MethodName = "Parse"
+        Parameters = [ NonGenericType Definitions.String ]
+        ReturnType = NonGenericType Definitions.Decimal
+        Generics = 0      
+    } |> NonGeneric
+
+let private opModule =
+    TypeDefinition {
+        Assembly = "FSharp.Core"
+        FullName = "Microsoft.FSharp.Core.Operators"
+    } |> NonGeneric
+
+let private toIntMeth =
+    Method {
+        MethodName = "toInt"
+        Parameters = [ NonGenericType Definitions.Float ]
+        ReturnType = NonGenericType Definitions.Int
+        Generics = 0      
+    } |> NonGeneric
+
+let private toUIntMeth =
+    Method {
+        MethodName = "toUInt"
+        Parameters = [ NonGenericType Definitions.Float ]
+        ReturnType = NonGenericType Definitions.Int
+        Generics = 0      
+    } |> NonGeneric
+
 let NumericConversion (fromTyp: TypeDefinition) (toTyp: TypeDefinition) expr =
-    match fromTyp.Value.FullName, toTyp.Value.FullName with
-    | SmallIntegralType, (SmallIntegralType | BigIntegralType | ScalarType)
-    | (BigIntegralType | NonNumericType), (SmallIntegralType | BigIntegralType | ScalarType)
+    let toNumber expr =
+        Application(Global ["Number"], [expr], Pure, Some 1)
+    let toDecimal expr =
+        Ctor (NonGeneric Definitions.Decimal, floatCtor, [expr])
+    let charCode expr =
+        Application(ItemGet(expr, Value (String "charCodeAt"), Pure), [], Pure, None)
+    let fromCharCode expr =
+        Application(Global ["String"; "fromCharCode"], [expr], Pure, Some 1)
+    let toIntegral (neg: int64) (mask: int64) expr =
+        if mask = 4294967295L then
+            if neg = 0L then
+                Call(None, opModule, toUIntMeth, [expr])
+            else
+                Call(None, opModule, toIntMeth, [expr])
+        elif neg = 0L then
+            expr ^& !~(Int64 mask)   
+        else
+            ((expr ^+ !~(Int64 neg)) ^& !~(Int64 mask)) ^- !~(Int64 neg) 
+    match getNumericTypeKind fromTyp.Value.FullName, getNumericTypeKind toTyp.Value.FullName with
+    | SmallIntegralType _, (BigIntegralType | ScalarType)
+    | BigIntegralType, (BigIntegralType | ScalarType)
     | ScalarType, ScalarType
+    | DecimalType, DecimalType
     | CharType, (CharType | StringType)
     | StringType, StringType
         -> expr
-    | ScalarType, SmallIntegralType
-        -> expr ^>> !~(Int 0)
+    | (SmallIntegralType _ | BigIntegralType | ScalarType), SmallIntegralType (neg, mask)
+        -> expr |> toIntegral neg mask
     | ScalarType, BigIntegralType
         -> Application(Global ["Math"; "trunc"], [expr], Pure, Some 1)
-    | (SmallIntegralType | BigIntegralType | ScalarType), CharType
-        -> Application(Global ["String"; "fromCharCode"], [expr], Pure, Some 1)
-    | CharType, (SmallIntegralType | BigIntegralType | ScalarType)
-        -> Application(ItemGet(expr, Value (String "charCodeAt"), Pure), [], Pure, None) 
-    | (SmallIntegralType | BigIntegralType | ScalarType | NonNumericType), StringType
+    | (SmallIntegralType _ | BigIntegralType | ScalarType), CharType
+        -> fromCharCode expr
+    | DecimalType, CharType
+        -> fromCharCode (toNumber expr)
+    | CharType, (BigIntegralType | ScalarType)
+        -> charCode expr
+    | CharType, SmallIntegralType (neg, mask) -> 
+        if mask >= int64 System.Int32.MaxValue then
+            charCode expr
+        else
+            charCode expr |> toIntegral neg mask
+    | CharType, DecimalType
+        -> charCode expr |> toDecimal
+    | (SmallIntegralType _ | BigIntegralType | ScalarType | DecimalType | NonNumericType), StringType
         -> Application(Global ["String"], [expr], Pure, Some 1)
-    | StringType, (SmallIntegralType | BigIntegralType | ScalarType)
-        -> Application(Global ["Number"], [expr], Pure, Some 1)
-    | _ -> expr
+    | (StringType | DecimalType | NonNumericType), (BigIntegralType | ScalarType)
+        -> toNumber expr
+    | (StringType | DecimalType | NonNumericType), SmallIntegralType (neg, mask)
+        -> toNumber expr |> toIntegral neg mask
+    | (SmallIntegralType _ | BigIntegralType | ScalarType), DecimalType
+        -> toDecimal expr
+    | StringType, DecimalType
+        -> Call(None, NonGeneric toTyp, parseDecimal, [expr])
+    | _ ->
+        expr
 
 /// Change every occurence of one Id to another
 type ReplaceId(fromId, toId) =

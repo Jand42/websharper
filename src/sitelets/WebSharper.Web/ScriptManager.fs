@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -91,10 +91,7 @@ type ScriptManager() =
                 WebSharper.Activator.META_ID, encode content)
             resources |> Seq.iter (fun r -> Re.Rendering.RenderCached(ctx, r, (fun _ -> writer)))
             writer.WriteLine()
-            writer.WriteLine("<script type='{0}'>", CT.Text.JavaScript.Text)
-            writer.WriteLine @"if (typeof IntelliFactory !=='undefined')"
-            writer.WriteLine @"  IntelliFactory.Runtime.Start();"
-            writer.WriteLine("</script>")
+            writer.WriteStartCode(ctx.ScriptBaseUrl)
 
     /// Searches the page for a ScriptManager.
     static member private TryFind(page: System.Web.UI.Page) =

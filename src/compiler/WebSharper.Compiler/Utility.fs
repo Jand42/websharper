@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -68,13 +68,3 @@ module internal Utility =
             (content, contentType)
         with e ->
             ("", CT.Text.Plain)
-
-    /// Writes WebSharper startup code to a text writer.
-    let WriteStartCode (withScript: bool) (writer: TextWriter) =
-        writer.WriteLine()
-        if withScript then
-            writer.WriteLine("<script type='{0}'>", CT.Text.JavaScript.Text)
-        writer.WriteLine @"if (typeof IntelliFactory !=='undefined')"
-        writer.WriteLine @"  IntelliFactory.Runtime.Start();"
-        if withScript then
-            writer.WriteLine("</script>")

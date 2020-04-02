@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -248,7 +248,7 @@ type GenericInlineResolver (generics) =
         TraitCall (
             thisObj |> Option.map this.TransformExpression, 
             typs |> List.map subs,
-            Generic meth.Entity (meth.Generics |> List.map subs), 
+            Generic (Method (meth.Entity.Value.SubstituteResolvedGenerics(gs))) (meth.Generics |> List.map subs), 
             args |> List.map this.TransformExpression
         )
 
@@ -277,7 +277,7 @@ type TypeCheckKind =
     | TypeOf of string
     | InstanceOf of Address
     | IsNull
-    | PlainObject
+    | PlainObject of bool
     | OtherTypeCheck
 
 let tryGetTypeCheck kind expr =
@@ -306,6 +306,7 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
     let mutable currentFuncArgs = None
     let mutable cctorCalls = Set.empty
     let labelCctors = Dictionary()
+    let boundVars = Dictionary()
 
     let innerScope f = 
         let cc = cctorCalls
@@ -360,18 +361,31 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             |> breaker.TransformExpression
             |> runtimeCleanerForced.TransformExpression
             |> collectCurried isCtor
-    
+
+    let breakStatement e = 
+        e 
+        |> removeLetsTr.TransformStatement
+        |> runtimeCleaner.TransformStatement
+        |> breaker.TransformStatement
+        |> runtimeCleanerForced.TransformStatement
+        |> collectCurriedTr.TransformStatement
+
     let getCurrentName() =
         match currentNode with
         | M.MethodNode (td, m) -> td.Value.FullName + "." + m.Value.MethodName
         | M.ConstructorNode (td, c) -> td.Value.FullName + "..ctor"
         | M.ImplementationNode (td, i, m) -> td.Value.FullName + ":" + i.Value.FullName + "." + m.Value.MethodName
         | M.TypeNode td -> td.Value.FullName + "..cctor"
+        | M.ExtraBundleEntryPointNode(_, n) -> "worker \"" + n + "\""
         | _ -> "unknown"
 
     member this.CheckResult (res) =
         if hasDelayedTransform then res else
             CheckNoInvalidJSForms(comp, currentIsInline, getCurrentName).TransformExpression res
+
+    member this.CheckResult (res) =
+        if hasDelayedTransform then res else
+            CheckNoInvalidJSForms(comp, currentIsInline, getCurrentName).TransformStatement res
      
     member this.Generate(g, p, m) =
         match comp.GetGeneratorInstance(g) with
@@ -412,7 +426,8 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
 
     member this.CustomTypeConstructor (typ : Concrete<TypeDefinition>, i : M.CustomTypeInfo, ctor: Constructor, args) =
         match i with
-        | M.FSharpRecordInfo fields ->
+        | M.FSharpRecordInfo _
+        | M.FSharpAnonRecordInfo _ ->
             this.TransformNewRecord(typ, args)
         | _ -> this.Error("Unhandled F# compiler generated constructor")
     
@@ -453,8 +468,9 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                     Unary(UnaryOperator.``!``, JSRuntime.DelegateEqual d1 d2)
                 | _ -> this.Error("Delegate equality check expects two arguments")
             | "ToString" -> Value (String typ.Entity.Value.FullName)
-            | mn -> this.Error("Unrecognized delegate method: " + mn)
-        | M.FSharpRecordInfo _ ->
+            | mn -> this.Error(sprintf "Unrecognized delegate method: %s.%s" typ.Entity.Value.FullName mn)
+        | M.FSharpRecordInfo _ 
+        | M.FSharpAnonRecordInfo _ ->
             match me.MethodName.[.. 2] with
             | "get" ->
                 let fn = me.MethodName.[4 ..]
@@ -465,7 +481,7 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             | _ -> 
                 match me.MethodName with
                 | "ToString" -> Value (String typ.Entity.Value.FullName)
-                | _ -> this.Error("Unrecognized member of F# record type")         
+                | _ -> this.Error(sprintf "No client-side support for member of F# record type, add JavaScript attribute: %s.%s" typ.Entity.Value.FullName me.MethodName)         
         | M.FSharpUnionInfo u ->
             // union types with a single non-null case do not have
             // nested subclass subclass for the case
@@ -527,14 +543,14 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             else
                 match mN with
                 | "ToString" -> Value (String typ.Entity.Value.FullName)
-                | _ -> this.Error("Unrecognized F# compiler generated method for union: " + mN)                 
+                | _ -> this.Error(sprintf "No client-side support for member of F# union type, add JavaScript attribute: %s.%s" typ.Entity.Value.FullName mN)                 
         | M.FSharpUnionCaseInfo c -> 
             match unionCase false c with
             | Some res -> res
-            | _ -> this.Error("Unrecognized F# compiler generated method for union case: " + me.MethodName)    
+            | _ -> this.Error(sprintf "No client-side support for member of F# union case type, add JavaScript attribute: %s.%s" typ.Entity.Value.FullName me.MethodName)    
         | M.EnumInfo e ->
             this.TransformCall(objExpr, NonGeneric e, meth, args)
-        | _ -> this.Error("Unrecognized compiler generated method: " + me.MethodName)
+        | _ -> this.Error(sprintf "Unrecognized compiler generated method: %s.%s" typ.Entity.Value.FullName me.MethodName)
      
     member this.CompileMethod(info, expr, typ, meth) =
         try
@@ -615,6 +631,8 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 comp.FailedCompiledConstructor(typ, ctor)
             else
             currentIsInline <- isInline info
+            // for Error inheritance, using restorePrototype
+            selfAddress <- comp.TryLookupClassInfo(typ) |> Option.bind (fun cls -> cls.Address)
             match info with
             | NotCompiled (i, _, opts) -> 
                 currentFuncArgs <- opts.FuncArgs
@@ -655,6 +673,14 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             let res = this.Error(sprintf "Unexpected error during JavaScript compilation: %s at %s" e.Message e.StackTrace)
             comp.AddCompiledStaticConstructor(typ, addr, res)
 
+    member this.CompileEntryPoint(stmt, node) =
+        try
+            currentNode <- node
+            this.TransformStatement(stmt) |> breakStatement |> this.CheckResult
+        with e ->
+            this.Error(sprintf "Unexpected error during JavaScript compilation: %s at %s" e.Message e.StackTrace)
+            |> ExprStatement
+
     static member CompileFull(comp: Compilation) =
         while comp.CompilingConstructors.Count > 0 do
             let (KeyValue((t, c), (i, e))) = Seq.head comp.CompilingConstructors
@@ -677,11 +703,21 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             comp.EntryPoint <- Some (toJS.TransformStatement(ep))
         | _ -> ()
 
-        let compileMethods() =
+        let rec compileMethods() =
             while comp.CompilingMethods.Count > 0 do
                 let toJS = DotNetToJavaScript(comp)
                 let (KeyValue((t, m), (i, e))) = Seq.head comp.CompilingMethods
                 toJS.CompileMethod(i, e, t, m)
+
+            while comp.CompilingExtraBundles.Count > 0 do
+                let toJS = DotNetToJavaScript(comp)
+                let (KeyValue(k, bundle)) = Seq.head comp.CompilingExtraBundles
+                let compiledEntryPoint = toJS.CompileEntryPoint(bundle.EntryPoint, bundle.Node)
+                comp.AddCompiledExtraBundle(k, compiledEntryPoint)
+
+            // both CompileMethod can add bundles and CompileEntryPoint can add methods,
+            // so we need to loop until both are exhausted.
+            if comp.CompilingMethods.Count > 0 then compileMethods()
 
         compileMethods()
         comp.CloseMacros()
@@ -731,18 +767,18 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 f
             | _ ->
                 let cargs = List.init currying (fun _ -> Id.New(mut = false))
-                Lambda(cargs, CurriedApplication(expr, cargs |> List.map Var))  
+                Lambda(cargs, CurriedApplication(expr, cargs |> List.map Var)) |> FixThisScope().Fix
         | TupledFuncArg tupling -> 
             match expr with
             | TupledLambda (args, body, _) ->
-                Lambda(List.ofSeq args, body)
+                Lambda(List.ofSeq args, body) |> FixThisScope().Fix
             | _ ->
                 match IgnoreExprSourcePos expr with
                 | OptimizedFSharpArg(f, TupledFuncArg arity) when arity = tupling -> 
                     f
                 | _ ->
                     let args = List.init tupling (fun _ -> Id.New(mut = false))
-                    Lambda(args, Application(expr, [NewArray(args |> List.map Var)], NonPure, Some 1))
+                    Lambda(args, Application(expr, [NewArray(args |> List.map Var)], NonPure, Some 1)) |> FixThisScope().Fix
 
     override this.TransformOptimizedFSharpArg(f, opt) =
         match opt with
@@ -752,13 +788,13 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                     Application (f, List.rev args, NonPure, Some arity)
                 else
                     let x = Id.New(mut = false)
-                    Lambda ([x], c (Var x :: args) (a - 1))
+                    Lambda ([x], c (Var x :: args) (a - 1)) |> FixThisScope().Fix
             c [] arity
         | TupledFuncArg arity ->
             let x = Id.New(mut = false)
             let args =
                 List.init arity (fun i -> (Var x).[Value (Int i)])
-            Lambda ([x], Application (f, args, NonPure, Some arity))
+            Lambda ([x], Application (f, args, NonPure, Some arity)) |> FixThisScope().Fix
         | _ ->
             this.TransformExpression(f)
 
@@ -834,6 +870,10 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 match comp.GetMacroInstance(macro) with
                 | Some m ->
                     try 
+                        let args =
+                            if m.NeedsTranslatedArguments then
+                                List.map this.TransformExpression args
+                            else args
                         m.TranslateCall {
                             This = thisObj
                             DefiningType = typ
@@ -842,6 +882,7 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                             Parameter = parameter |> Option.map M.ParameterObject.ToObj
                             IsInline = currentIsInline
                             Compilation = comp
+                            BoundVars = boundVars
                         }
                     with e -> MacroError (e.Message + " at " + e.StackTrace) 
                 | _ -> 
@@ -875,6 +916,9 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                         Call(trThisObj(), typ, meth, trArgs())
                     else 
                         this.HandleMacroNeedsResolvedTypeArg(t, macro.Value.FullName)
+                | MacroUsedBoundVar (v, mres) ->
+                    boundVars.Remove v |> ignore
+                    getExpr mres
             getExpr macroResult
         | M.Remote (kind, handle, rh) ->
             let name, mnode =
@@ -903,6 +947,8 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                     match t with
                     | ConcreteType c ->
                         this.AddDependency(M.TypeNode c.Entity)
+                        if not (comp.HasType c.Entity) then
+                            this.Warning("Remote method is returning a type which is not fully supported on client side. Add a JavaScript attribute or proxy for " + c.Entity.Value.FullName)
                         c.Generics |> List.iter addTypeDeps
                     | ArrayType(t, _) -> addTypeDeps t
                     | TupleType (ts, _) -> ts |> List.iter addTypeDeps
@@ -978,37 +1024,40 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 None
         let trmv = meth.Entity.Value
         let mName = trmv.MethodName
-        let pLength = trmv.Parameters.Length
         let res =
             typs |> List.tryPick (fun typ ->
                 match typ with
                 | ConcreteType ct ->
+                    //let trmv = trmv.SubstituteGenerics(Array.ofList (typ :: meth.Generics))
                     let methods = comp.GetMethods ct.Entity
                     let getMethods pars ret =
                         methods |> Seq.choose (fun m ->
                             let mv = m.Value
-                            if mv.MethodName = mName 
-                                && mv.Parameters.Length = pLength 
-                                && List.forall2 (fun a b -> Type.IsGenericCompatible(a, b)) mv.Parameters pars 
-                                && Type.IsGenericCompatible(mv.ReturnType, ret) then 
+                            if mv.MethodName = mName then
+                                let mSig = FSharpFuncType (TupleType (mv.Parameters, false), mv.ReturnType)
+                                let tcSig = FSharpFuncType (TupleType (pars, false), ret)
+                                if Type.IsGenericCompatible(mSig, tcSig) then
                                     Some m 
+                                else
+                                    None
                             else None
                         ) 
                         |> List.ofSeq
-                    let ms =                        
-                        match getMethods trmv.Parameters trmv.ReturnType with
-                        | [] -> []
-                        | [_] as ms -> ms
-                        | _ ->
-                            let gen = ct.Generics @ meth.Generics |> Array.ofList
-                            let pars = trmv.Parameters |> List.map (fun t -> t.SubstituteGenerics gen)
-                            let ret = trmv.ReturnType.SubstituteGenerics gen
-                            getMethods pars ret
-                    match ms with
+                    match getMethods trmv.Parameters trmv.ReturnType with
                     | [ m ] ->
                         this.TransformCall(thisObj, ct, Generic m meth.Generics, args) |> Some
                     | [] -> 
-                        delay (sprintf "Could not find method for trait call: %s" mName)
+                        let targets =
+                            methods |> Seq.choose (fun m ->
+                                let mv = m.Value
+                                if mv.MethodName = mName then
+                                    let mSig = FSharpFuncType (TupleType (mv.Parameters, false), mv.ReturnType)
+                                    Some (string mSig)
+                                else None
+                            ) 
+                            |> String.concat "; "
+                        let source = string (FSharpFuncType (TupleType (trmv.Parameters, false), trmv.ReturnType))
+                        delay (sprintf "Could not find method for trait call: %s targets:%s source:%s" mName targets source)
                     | _ -> delay (sprintf "Ambiguity at translating trait call: %s" mName)
                 | _ ->
                     delay "Using a trait call requires the Inline attribute"
@@ -1082,13 +1131,18 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 match comp.GetMacroInstance(macro) with
                 | Some m ->
                     try
+                        let args =
+                            if m.NeedsTranslatedArguments then
+                                List.map this.TransformExpression args
+                            else args
                         m.TranslateCtor {
-                             DefiningType = typ
-                             Constructor = ctor
-                             Arguments = args
-                             Parameter = parameter |> Option.map M.ParameterObject.ToObj
-                             IsInline = currentIsInline
-                             Compilation = comp
+                            DefiningType = typ
+                            Constructor = ctor
+                            Arguments = args
+                            Parameter = parameter |> Option.map M.ParameterObject.ToObj
+                            IsInline = currentIsInline
+                            Compilation = comp
+                            BoundVars = boundVars
                         }
                     with e -> MacroError (e.Message + " at " + e.StackTrace)  
                 | _ -> MacroError "Macro type failed to load"
@@ -1115,6 +1169,9 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                         Ctor(typ, ctor, trArgs())
                     else 
                         this.HandleMacroNeedsResolvedTypeArg(t, macro.Value.FullName)
+                | MacroUsedBoundVar (v, mres) ->
+                    boundVars.Remove v |> ignore
+                    getExpr mres
             getExpr macroResult
         | _ -> this.Error("Invalid metadata for constructor.")
 
@@ -1148,6 +1205,24 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             let optFields = 
                 fields |> List.choose (fun f -> 
                     if f.Optional then Some (Value (String f.JSName)) else None)
+            if List.isEmpty optFields then obj
+            else JSRuntime.DeleteEmptyFields obj optFields
+        | M.FSharpAnonRecordInfo fields ->
+            let obj = 
+                (args, fields, typ.Generics)
+                |||> Seq.map3 (fun a f g -> 
+                    f,
+                        if g.IsOptional then
+                            let id = Id.New(mut = false)
+                            Let(id, this.TransformExpression a,
+                                Conditional(Var id, ItemGet(Var id, Value (String "$0"), Pure), Undefined))
+                        else this.TransformExpression a)
+                |> List.ofSeq |> Object
+            let optFields = 
+                (fields, typ.Generics)
+                ||> List.map2 (fun f g -> 
+                    if g.IsOptional then Some (Value (String f)) else None)
+                |> List.choose id
             if List.isEmpty optFields then obj
             else JSRuntime.DeleteEmptyFields obj optFields
         | _ -> this.Error("Unhandled F# compiler generated constructor")
@@ -1197,20 +1272,27 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             try
                 let t = typ.Generics.[i]
                 match this.GetTypeCheckKind t with
-                | PlainObject ->
+                | PlainObject hasNull ->
                     let prevCases =
                         List.init i (fun j ->
                             this.GetTypeCheckKind (typ.Generics.[j]) 
                         )
                     let prevCasesTranslating =
                         prevCases |> List.forall (function 
-                            | TypeOf _ | InstanceOf _ | IsNull -> true 
+                            | TypeOf _ | InstanceOf _ -> true 
+                            | IsNull -> not hasNull  
                             | _ -> false
                         )
                     if prevCasesTranslating then 
-                        (this.TransformExpression expr |> getItem "constructor") ^=== (Global ["Object"])
+                        if hasNull then
+                            let v = Id.New(mut = false)
+                            Let (v, this.TransformExpression expr,
+                                (Var v ^== Value Null) ^|| (Var v |> getItem "constructor") ^=== (Global ["Object"])    
+                            )
+                        else
+                            (this.TransformExpression expr |> getItem "constructor") ^=== (Global ["Object"])
                     else
-                        this.Error (sprintf "Translating erased union test failed, case: %s, more than one plain object type found" case)
+                        this.Error (sprintf "Translating erased union test failed, case: %s, more than one plain object or null type found" case)
                 | _ -> 
                     this.TransformTypeCheck(expr, t)
             with e ->
@@ -1227,10 +1309,10 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 if u.HasNull then
                     let v = Id.New(mut = false)
                     Let (v, this.TransformExpression expr, 
-                        (Var v ^!= Value Null) ^&& (ItemGet(Var v, Value (String "$"), Pure) ^== Value (Int i)) 
+                        (Var v ^!= Value Null) ^&& ((Var v |> getItem "$") ^== Value (Int i)) 
                     )
                 else
-                    ItemGet(this.TransformExpression expr, Value (String "$"), Pure) ^== Value (Int i)    
+                    (this.TransformExpression expr |> getItem "$") ^== Value (Int i)    
         | _ -> this.Error("Failed to translate union case test.")
     
     override this.TransformUnionCaseGet(expr, typ, case, field) =
@@ -1322,6 +1404,8 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             // This is allowing some simple inlines
             | Let (i1, a1, New(func, [Var v1])) when i1 = v1 ->
                 Application(func |> getItem "call", expr :: [a1], NonPure, None)
+            | Let (i1, a1, Let (i2, a2, New(func, [Var v1; Var v2]))) when i1 = v1 && i2 = v2 ->
+                Application(func |> getItem "call", expr :: [a1; a2], NonPure, None)
             | _ ->
                 comp.AddError (this.CurrentSourcePos, SourceError "Chained constructor is an Inline in a not supported form")
                 Application(errorPlaceholder, args |> List.map this.TransformExpression, NonPure, None)
@@ -1329,7 +1413,7 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             match IgnoreExprSourcePos expr with
             | This -> norm
             | Var _ -> def()
-            | _ -> this.Error("Unrecognized this value in constructor inline")
+            | _ -> this.Error("Unrecognized 'this' value in constructor inline")
         else def()
 
     override this.TransformCctor(typ) =
@@ -1380,9 +1464,10 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             base.TransformBinary(a, b, c)
 
     override this.TransformCoalesce(a, b, c) =
-        let trA = this.TransformExpression a
-        let trC = innerScope <| fun () -> this.TransformExpression c
-        Coalesce(trA, b, trC)
+        let aId = Id.New()
+        this.TransformLet(aId, a,
+            Conditional(Binary(Var aId, BinaryOperator.``===``, !~Null), c, Var aId)
+        )
     
     override this.TransformWhile(a, b) =
         let trA = this.TransformExpression a
@@ -1449,6 +1534,17 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
             | _ -> this.Error ("Self address empty")
         | _ -> this.Error ("Self address missing")
 
+    override this.TransformLet (a, b, c) =
+        if CountVarOccurence(a).Get(c) = 1 then
+            boundVars.Add(a, b)
+            let trC = this.TransformExpression(c)
+            if boundVars.Remove a then
+                let trB = this.TransformExpression(b)
+                Let(a, trB, trC)
+            else trC
+        else
+            base.TransformLet(a, b, c)
+
     override this.TransformFieldGet (expr, typ, field) =
         if comp.HasGraph then
             this.AddTypeDependency typ.Entity
@@ -1482,6 +1578,20 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                     else
                         this.TransformExpression expr.Value |> getItemRO name ro
                 | _ -> this.Error(sprintf "Could not find field of F# record type: %s.%s" typ.Entity.Value.FullName field)
+            | M.FSharpAnonRecordInfo fields ->
+                let fOpt =
+                    (fields, typ.Generics)
+                    ||> List.map2 (fun f g ->
+                        if f = field then Some (f, g.IsOptional) else None    
+                    )
+                    |> List.tryPick id
+                match fOpt with
+                | Some (name, isOpt) ->
+                    if isOpt then
+                        JSRuntime.GetOptional (this.TransformExpression expr.Value |> getItem name)
+                    else
+                        this.TransformExpression expr.Value |> getItemRO name false
+                | _ -> this.Error(sprintf "Could not find field of F# anonymous record type: %s.%s" typ.Entity.Value.FullName field)
             | M.FSharpUnionInfo _ -> this.Error "Union base type should not have fields"   
             | _ -> failwith "CustomTypeField error"          
         | PropertyField (getter, _) ->
@@ -1520,6 +1630,20 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                     else
                         ItemSet(this.TransformExpression expr.Value, Value (String name), this.TransformExpression value)
                 | _ -> this.Error(sprintf "Could not find field of F# record type: %s.%s" typ.Entity.Value.FullName field)
+            | M.FSharpAnonRecordInfo fields ->
+                let fOpt =
+                    (fields, typ.Generics)
+                    ||> List.map2 (fun f g ->
+                        if f = field then Some (f, g.IsOptional) else None    
+                    )
+                    |> List.tryPick id
+                match fOpt with
+                | Some (name, isOpt) ->
+                    if isOpt then
+                        JSRuntime.SetOptional (this.TransformExpression expr.Value) (Value (String name)) (this.TransformExpression value)
+                    else
+                        ItemSet(this.TransformExpression expr.Value, Value (String name), this.TransformExpression value)
+                | _ -> this.Error(sprintf "Could not find field of F# anonymous record type: %s.%s" typ.Entity.Value.FullName field)
             | M.FSharpUnionCaseInfo _ -> this.Error "Union case field should not be set" 
             | M.FSharpUnionInfo _ -> this.Error "Union base type should not have fields"   
             | _ -> failwith "CustomTypeField error"          
@@ -1573,16 +1697,19 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 | Choice1Of2 (Some a) ->
                     InstanceOf a
                 | Choice1Of2 None ->
-                    PlainObject
+                    PlainObject true
                 | Choice2Of2 ct -> 
                     match ct with
                     | M.DelegateInfo _ ->
                         TypeOf "function"
                     | M.FSharpRecordInfo _
-                    | M.FSharpUnionInfo _
-                    | M.FSharpUnionCaseInfo _
+                    | M.FSharpAnonRecordInfo _
                     | M.StructInfo _ ->
-                        PlainObject
+                        PlainObject false
+                    | M.FSharpUnionInfo ui ->
+                        PlainObject ui.HasNull
+                    | M.FSharpUnionCaseInfo uci ->
+                        PlainObject (uci.Kind = M.ConstantFSharpUnionCase Null)
                     | _ ->
                         OtherTypeCheck
         | _ ->
@@ -1645,10 +1772,17 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                         | Some ii ->
                             warnIgnoringGenerics()
                             let shortestName = ii.Methods.Values |> Seq.minBy String.length
-                            Binary(
-                                Value (String shortestName),
-                                BinaryOperator.``in``,
-                                trExpr
+                            let i = Id.New(mut = false)
+                            Let(i, trExpr,
+                                Binary(
+                                    (tryGetTypeCheck (TypeOf "object") (Var i)).Value,
+                                    BinaryOperator.``&&``,
+                                    Binary(
+                                        Value (String shortestName),
+                                        BinaryOperator.``in``,
+                                        (Var i)
+                                    )
+                                )
                             )
                         | _ ->
                             this.Error(sprintf "Failed to compile a type check for type '%s'" tname)

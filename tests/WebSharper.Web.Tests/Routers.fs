@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -57,6 +57,15 @@ module PerformanceTests =
         | [<EndPoint "/sub1">] Sub1
         | [<EndPoint "/sub2">] Sub2 of string
 
+    type CorsA =
+        | [<EndPoint "POST /a">] CorsA_A
+
+    type CorsApi =
+        | [<EndPoint "/a">] CorsA of CorsA
+        | [<EndPoint "PUT /b">] CorsB of body: MultipleFormData
+        | [<EndPoint "POST /c"; Json "body">] CorsC of body: RecTest
+        | [<EndPoint "GET /d">] CorsD
+
     type Action =
         | [<EndPoint "/">] URoot
         | [<EndPoint "/">] USubAction of SubAction
@@ -72,6 +81,11 @@ module PerformanceTests =
         | [<EndPoint "/record-with-queries">] URecordQ of RecQTest
         | [<EndPoint "/list">] UList of list<int * string>
         | [<EndPoint "/array">] UArray of (int * string)[]
+        | [<EndPoint "/priority">] UPriority1
+        | [<EndPoint "/priority">] UPriority2 of int
+        | [<EndPoint "/priority">] UPriority3 of string
+        | [<EndPoint "/priority">] UPriority4 of int * string
+        | [<EndPoint "/priority">] UPriority5 of string * string
         | [<Method "POST"; EndPoint "/post">] UPost of int
         | [<Method "PUT"; EndPoint "/put">] UPut of int
         | [<EndPoint "POST /post2">] UPost2 of int
@@ -82,6 +96,8 @@ module PerformanceTests =
         | [<EndPoint "/multiple" >] UMultiple
         | [<EndPoint "/multiple" >] UMultiple2 of int
         | [<EndPoint "/multiple" >] UMultiple3 of int * int
+        | [<EndPoint "/wildcard-string">] UWildcardStringEmpty
+        | [<EndPoint "/wildcard-string/special-case">] UWildcardStringSpecialCase
         | [<EndPoint "/wildcard-string"; Wildcard>] UWildcardString of string
         | [<EndPoint "/wildcard-array"; Wildcard>] UWildcardArray of int[]
         | [<EndPoint "/wildcard-list"; Wildcard>] UWildcardList of int list
@@ -89,12 +105,14 @@ module PerformanceTests =
         | [<EndPoint "/csharp">] UCSharp of CSharpEndPointRoot
         | [<EndPoint "/type-tests">] TypeTests of 
             Guid * single * double * sbyte * byte * int16 * uint16 * uint32 * int64 * uint64  
+        | [<EndPoint "/cors">] UCors of Cors<CorsApi>
 
     let TestValues =
         [
             URoot
             USubAction Sub1
             USubAction (Sub2 "x")
+            UString ""
             UString "hello"
             UString """{} ## @!~~ +++ fe öüóőúéáű /\ `$%^&*  ->%20<- .,;"""
             UQuery "hello"
@@ -124,6 +142,8 @@ module PerformanceTests =
             UMultiple
             UMultiple2 1
             UMultiple3 (1, 2)
+            UWildcardStringEmpty
+            UWildcardStringSpecialCase
             UWildcardString "1/2/3/hi"
             UWildcardArray [| 1; 2; 3 |]
             UWildcardList [ 1; 2; 3 ]
@@ -132,14 +152,24 @@ module PerformanceTests =
             UTwoUnions (A1 1, A1 1)
             UCSharp (new CSharpEndPointRoot())
             UCSharp (new CSharpEndPointRoot.Sub1(X = 42))
-            TypeTests (Guid.NewGuid(), 1.3f, 1.4, 15y, 16uy, 64s, 65us, 66u, 67L, 68UL) 
+            TypeTests (Guid.NewGuid(), 1.3f, 1.4, 15y, 16uy, 64s, 65us, 66u, 67L, 68UL)
+            UCors <| Cors.Of (CorsA CorsA_A)
+            UCors <| Cors.Of (CorsB { Text = "helloCorsB"; Id = Some 2; Flag = false })
+            UCors <| Cors.Of (CorsC { A = "helloCorsC"; B = 123; C = false })
+            UCors <| Cors.Of CorsD
         ]
 
     let ExtraTestValues =
         [
+            UString "", "/string"
             UString "xx", "/stringtoo/xx"
             UCSharp (new CSharpEndPointRoot()), "/csharp/home"
             UCSharp (new CSharpEndPointRoot.Sub1(X = 42)), "/csharp/sub1full/42"
+            UPriority1, "/priority"
+            UPriority2 123, "/priority/123"
+            UPriority3 "xx", "/priority/xx"
+            UPriority4 (123, "xx"), "/priority/123/xx"
+            UPriority5 ("xx", "yy"), "/priority/xx/yy"
         ]
 
     let mutable expecting = None
@@ -150,23 +180,36 @@ module PerformanceTests =
         async.Zero()    
     
     let Site =
-        Sitelet.Infer<Action> (fun ctx act -> 
-            let def() =
-                for i in 1 .. 49 do
-                    ctx.Link act |> ignore // stress-test writing links 
-                Content.Text (
-                    ctx.Link act
-                ) 
-            match expecting with
-            | Some exp ->
-                if exp <> act && (match exp with UCSharp _ -> false | _ -> true) then
+        Sitelet.New (Router.Infer<Action>()) (fun ctx act ->
+            let ok() =
+                let act =
+                    match act with
+                    | UCors (Cors.Of x) -> UCors (Cors.Of x) // remove DefaultAllows
+                    | act -> act
+                let def() =
+                    for i in 1 .. 49 do
+                        ctx.Link act |> ignore // stress-test writing links 
                     Content.Text (
-                        sprintf "Wrong endpoint parsed, expecting %A, got %A" exp act
+                        ctx.Link act
                     ) 
-                else
-                    expecting <- None
-                    def()
-            | _ -> def()
+                match expecting with
+                | Some exp ->
+                    if exp <> act && (match exp with UCSharp _ -> false | _ -> true) then
+                        Content.Text (
+                            sprintf "Wrong endpoint parsed, expecting %A, got %A" exp act
+                        ) 
+                    else
+                        expecting <- None
+                        def()
+                | _ -> def()
+            match act with
+            | UCors cors ->
+                Content.Cors cors (fun allows ->
+                    { allows with
+                        Origins = ["*"]
+                        Headers = ["Content-Type"] }
+                ) (fun _ -> ok())
+            | _ -> ok()
         )
 
     let ShiftedRouter = 
@@ -223,3 +266,18 @@ module CombinatorTests =
         TestValues |> Seq.map (fun v ->
             v, constructed.Link v
         ) |> Array.ofSeq |> async.Return
+
+module Bug940 =
+    type Fails =
+        | [<EndPoint "/">] Home
+        | [<EndPoint "/about">] About
+
+    [<Remote>]
+    let Test() =
+        let r = Router.Infer<Fails>()
+        let l = { Route.Segment "about" with Method = Some "GET" }
+        match l |> Router.Parse r with
+        | Some About -> None
+        | Some _ -> Some "Failed to parse /about correctly"
+        | None -> Some "Failed to parse /about"
+        |> async.Return

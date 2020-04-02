@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -23,7 +23,7 @@
 module WebSharper.Core.Metadata
 
 open System.Collections.Generic
-
+open System.Runtime.InteropServices
 open WebSharper.Core.AST
 
 type RemotingKind =
@@ -238,6 +238,7 @@ type CustomTypeInfo =
     | NotCustomType
     | EnumInfo of TypeDefinition
     | StructInfo
+    | FSharpAnonRecordInfo of list<string>
 
 type Node =
     | MethodNode of TypeDefinition * Method
@@ -248,6 +249,7 @@ type Node =
     | ResourceNode of TypeDefinition * option<ParameterObject>
     | AssemblyNode of string * bool
     | EntryPointNode 
+    | ExtraBundleEntryPointNode of string * string
 
 type GraphData =
     {
@@ -271,6 +273,18 @@ type MetadataEntry =
     | ConstructorEntry of Constructor
     | CompositeEntry of list<MetadataEntry>
 
+type ExtraBundle =
+    {
+        AssemblyName : string
+        BundleName : string
+    }
+
+    member this.FileName =
+        this.AssemblyName + "." + this.BundleName + ".js"
+
+    member this.MinifiedFileName =
+        this.AssemblyName + "." + this.BundleName + ".min.js"
+
 type Info =
     {
         SiteletDefinition: option<TypeDefinition>
@@ -278,10 +292,10 @@ type Info =
         Interfaces : IDictionary<TypeDefinition, InterfaceInfo>
         Classes : IDictionary<TypeDefinition, ClassInfo>
         CustomTypes : IDictionary<TypeDefinition, CustomTypeInfo>
-        EntryPoint : option<Statement>
         MacroEntries : IDictionary<MetadataEntry, list<MetadataEntry>>
         Quotations : IDictionary<SourcePos, TypeDefinition * Method * list<string>>
         ResourceHashes : IDictionary<string, int>
+        ExtraBundles : Set<ExtraBundle>
     }
 
     static member Empty =
@@ -291,10 +305,10 @@ type Info =
             Interfaces = Map.empty
             Classes = Map.empty
             CustomTypes = Map.empty
-            EntryPoint = None
             MacroEntries = Map.empty
             Quotations = Map.empty
             ResourceHashes = Map.empty
+            ExtraBundles = Set.empty
         }
 
     static member UnionWithoutDependencies (metas: seq<Info>) = 
@@ -350,14 +364,16 @@ type Info =
             Interfaces = Dict.union (metas |> Seq.map (fun m -> m.Interfaces))
             Classes = unionMerge (metas |> Seq.map (fun m -> m.Classes))
             CustomTypes = Dict.unionDupl (metas |> Seq.map (fun m -> m.CustomTypes))
-            EntryPoint = 
-                match metas |> Array.choose (fun m -> m.EntryPoint) with
-                | [||] -> None
-                | [| ep |] -> Some ep
-                | _ -> failwith "Multiple entry points found."
             MacroEntries = Dict.unionAppend (metas |> Seq.map (fun m -> m.MacroEntries))
-            Quotations = Dict.union (metas |> Seq.map (fun m -> m.Quotations))
+            Quotations = 
+                try
+                    Dict.union (metas |> Seq.map (fun m -> m.Quotations))
+                with Dict.UnionError key ->
+                    let pos = key :?> SourcePos
+                    failwithf "Quoted expression found at the same position in two files with the same name: %s %d:%d-%d:%d"
+                        pos.FileName (fst pos.Start) (snd pos.Start) (fst pos.End) (snd pos.End)
             ResourceHashes = Dict.union (metas |> Seq.map (fun m -> m.ResourceHashes))
+            ExtraBundles = Set.unionMany (metas |> Seq.map (fun m -> m.ExtraBundles))
         }
 
     member this.DiscardExpressions() =
@@ -371,7 +387,6 @@ type Info =
                         Implementations = ci.Implementations |> Dict.map (fun (a, _) -> a, Undefined)
                     } 
                 )
-            EntryPoint = this.EntryPoint |> Option.map (fun _ -> Empty)
         }
 
     member this.DiscardInlineExpressions() =
@@ -389,7 +404,6 @@ type Info =
                         Methods = ci.Methods |> Dict.map (fun (i, p, e) -> i, p, e |> discardInline i)
                     } 
                 )
-            EntryPoint = this.EntryPoint
         }
 
     member this.DiscardNotInlineExpressions() =
@@ -407,7 +421,6 @@ type Info =
                         Methods = ci.Methods |> Dict.map (fun (i, p, e) -> i, p, e |> discardNotInline i)
                     } 
                 )
-            EntryPoint = this.EntryPoint |> Option.map (fun _ -> Empty)
         }
 
     member this.IsEmpty =
@@ -415,8 +428,7 @@ type Info =
         this.CustomTypes.Count = 0 &&
         this.Interfaces.Count = 0 &&
         this.MacroEntries.Count = 0 &&
-        this.SiteletDefinition.IsNone &&
-        this.EntryPoint.IsNone
+        this.SiteletDefinition.IsNone
 
 module internal Utilities = 
  
@@ -469,7 +481,7 @@ type ICompilation =
     abstract GetMethodAttributes : TypeDefinition * Method -> option<list<TypeDefinition * ParameterObject[]>>
     abstract GetConstructorAttributes : TypeDefinition * Constructor -> option<list<TypeDefinition * ParameterObject[]>>
     abstract GetJavaScriptClasses : unit -> list<TypeDefinition>
-    abstract ParseJSInline : string * list<Expression> -> Expression
+    abstract ParseJSInline : string * list<Expression> * [<OptionalArgument; DefaultParameterValue null>] position: SourcePos * [<OptionalArgument; DefaultParameterValue null>] dollarVars: string[] -> Expression
     abstract NewGenerated : string list -> TypeDefinition * Method * Address
     abstract AddGeneratedCode : Method * Expression -> unit
     abstract AddGeneratedInline : Method * Expression -> unit
@@ -478,14 +490,15 @@ type ICompilation =
     abstract AddMetadataEntry : MetadataEntry * MetadataEntry -> unit
     abstract AddError : option<SourcePos> * string -> unit 
     abstract AddWarning : option<SourcePos> * string -> unit 
-              
+    abstract AddBundle : name: string * entryPoint: Statement * [<OptionalArgument; DefaultParameterValue false>] includeJsExports: bool -> ExtraBundle
+
 module IO =
     open EmbeddedResourceNames
     
     module B = Binary
 
     let EncodingProvider = B.EncodingProvider.Create()
-    let CurrentVersion = "4.2"
+    let CurrentVersion = "4.6"
     
     let MetadataEncoding =
         try

@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -28,6 +28,7 @@ open WebSharper.Compiler
 
 open WebSharper.Compiler.CommandTools
 open WebSharper.Compiler.FrontEnd
+module C = WebSharper.Compiler.Commands
 
 open ErrorPrinting
 
@@ -76,7 +77,7 @@ let Compile config =
                 }
             with e ->
                 refError <- true
-                PrintGlobalError ("Error merging WebSharper metadata: " + e.Message)
+                PrintGlobalError (sprintf "Error merging WebSharper metadata: %A" e)
                 None
 
     TimedStage "Loading referenced metadata"
@@ -86,7 +87,7 @@ let Compile config =
         argError "" // exits without printing more errors    
     | Some refMeta ->
 
-    let compiler = WebSharper.Compiler.CSharp.WebSharperCSharpCompiler(printfn "%s", UseVerifier = false)
+    let compiler = WebSharper.Compiler.CSharp.WebSharperCSharpCompiler(printfn "%s")
 
     let referencedAsmNames =
         paths
@@ -116,6 +117,12 @@ let Compile config =
     if config.ProjectFile = null then
         argError "You must provide project file path."
     
+    let assem = if isBundleOnly then None else Some (loader.LoadFile config.AssemblyFile)
+
+    if assem.IsSome && assem.Value.HasWebSharperMetadata then
+        TimedStage "WebSharper resources already exist, skipping"
+    else
+
     let comp =
         compiler.Compile(refMeta, config)
     
@@ -124,16 +131,23 @@ let Compile config =
         argError "" // exits without printing more errors
     else
 
-    let js, currentMeta, sources =
+    let js, currentMeta, sources, extraBundles =
+        let currentMeta = comp.ToCurrentMetadata(config.WarnOnly)
         if isBundleOnly then
-            let currentMeta, sources = TransformMetaSources comp.AssemblyName (comp.ToCurrentMetadata(config.WarnOnly)) config.SourceMap 
-            None, currentMeta, sources
+            let currentMeta, sources = TransformMetaSources comp.AssemblyName currentMeta config.SourceMap 
+            let extraBundles = Bundling.AddExtraBundles config metas currentMeta refs comp (Choice1Of2 comp.AssemblyName)
+            None, currentMeta, sources, extraBundles
         else
-            let assem = loader.LoadFile config.AssemblyFile
+            let assem = assem.Value
+
+            if config.ProjectType = Some Proxy then
+                EraseAssemblyContents assem
+                TimedStage "Erasing assembly content for Proxy project"
+
+            let extraBundles = Bundling.AddExtraBundles config metas currentMeta refs comp (Choice2Of2 assem)
 
             let js, currentMeta, sources =
-                ModifyAssembly (Some comp) refMeta
-                    (comp.ToCurrentMetadata(config.WarnOnly)) config.SourceMap config.AnalyzeClosures assem
+                ModifyAssembly (Some comp) refMeta currentMeta config.SourceMap config.AnalyzeClosures assem
 
             match config.ProjectType with
             | Some (Bundle | Website) ->
@@ -148,10 +162,10 @@ let Compile config =
                     printfn "%s" js
                 | _ -> ()
 
-            assem.Write (config.KeyFile |> Option.map readStrongNameKeyPair) config.AssemblyFile
+            assem.Write (config.KeyFile |> Option.map File.ReadAllBytes) config.AssemblyFile
 
             TimedStage "Writing resources into assembly"
-            js, currentMeta, sources
+            js, currentMeta, sources, extraBundles
 
     match config.JSOutputPath, js with
     | Some path, Some (js, _) ->
@@ -168,18 +182,30 @@ let Compile config =
     match config.ProjectType with
     | Some (Bundle | BundleOnly) ->
         let currentJS =
-            lazy CreateBundleJSOutput refMeta currentMeta
-        Bundling.Bundle config metas currentMeta currentJS sources refs
+            lazy CreateBundleJSOutput refMeta currentMeta comp.EntryPoint
+        Bundling.Bundle config metas currentMeta comp currentJS sources refs extraBundles
         TimedStage "Bundling"
     | Some Html ->
         ExecuteCommands.Html config |> ignore
         TimedStage "Writing offline sitelets"
-    | Some Website ->
-        ExecuteCommands.Unpack config |> ignore
-        TimedStage "Unpacking"
+    | Some Website
     | _ when Option.isSome config.OutputDir ->
-        ExecuteCommands.Unpack config |> ignore
-        TimedStage "Unpacking"
+        match ExecuteCommands.GetWebRoot config with
+        | Some webRoot ->
+            let res =
+                match ExecuteCommands.Unpack webRoot config with
+                | C.Ok -> 0
+                | C.Errors errors ->
+                    if config.WarnOnly || config.DownloadResources = Some false then
+                        errors |> List.iter PrintGlobalWarning
+                        0
+                    else
+                        errors |> List.iter PrintGlobalError
+                        1
+            TimedStage "Unpacking"
+            if res = 1 then argError "" // exits without printing more errors    
+        | None ->
+            PrintGlobalError "Failed to unpack website project, no WebSharperOutputDir specified"
     | _ -> ()
 
 let rec compileMain (argv: string[]) =
@@ -245,10 +271,15 @@ let rec compileMain (argv: string[]) =
             VSStyleErrors = true
         }
     wsArgs := SetDefaultProjectFile !wsArgs false
+    wsArgs := SetScriptBaseUrl !wsArgs
 
-    let wsconfig = Path.Combine(Path.GetDirectoryName (!wsArgs).ProjectFile, "wsconfig.json")
-    if File.Exists wsconfig then
-        wsArgs := (!wsArgs).AddJson(File.ReadAllText wsconfig)
+    if (!wsArgs).UseJavaScriptSymbol then
+        let cArgs = (!wsArgs).CompilerArgs
+        if cArgs |> Array.contains "-define:JAVASCRIPT" |> not then
+            wsArgs := 
+                { !wsArgs with 
+                    CompilerArgs = Array.append cArgs [|"-define:JAVASCRIPT"|]
+                }
 
     try
         Compile !wsArgs
@@ -278,5 +309,5 @@ let main argv =
         PrintGlobalError msg
         1    
     | e -> 
-        PrintGlobalError (sprintf "Global error '%s' at %s" e.Message e.StackTrace)
+        PrintGlobalError (sprintf "Global error: %A" e)
         1

@@ -1,6 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="15.0" DefaultTargets="Build">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <Import Project="..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform>AnyCPU</Platform>
@@ -19,12 +20,15 @@
     <IISExpressWindowsAuthentication />
     <IISExpressUseClassicPipelineMode />
     <OutputPath>bin\</OutputPath>
+    <WebProjectOutputDir>$(MSBuildThisFileDirectory)</WebProjectOutputDir>
+    <WebSharperProject>Website</WebSharperProject>
     <WebSharperTypeScriptDeclaration>True</WebSharperTypeScriptDeclaration>
     <WebSharperDownloadResources>True</WebSharperDownloadResources>
     <FSharp40>True</FSharp40>
     <UseGlobalApplicationHostFile />
     <Use64BitIISExpress />
     <TargetFrameworkProfile />
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <PropertyGroup>
     <DebugType>pdbonly</DebugType>
@@ -85,6 +89,14 @@
       <Project>{730ae40a-001c-4137-972d-898dc7c2bf0a}</Project>
       <Name>WebSharper.JQuery</Name>
     </ProjectReference>
+    <ProjectReference Include="..\..\src\stdlib\WebSharper.MathJS.Extensions\WebSharper.MathJS.Extensions.fsproj">
+      <Project>{e4b66fc3-0227-481a-9fa0-eb7a0bf66bac}</Project>
+      <Name>WebSharper.MathJS.Extensions</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\stdlib\WebSharper.MathJS\WebSharper.MathJS.fsproj">
+      <Project>{927a30b7-9316-4374-8526-a011234638b9}</Project>
+      <Name>WebSharper.MathJS</Name>
+    </ProjectReference>
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Testing\WebSharper.Testing.fsproj">
       <Project>{a7f7a74b-d0ee-4918-8a54-280fc7d2a30c}</Project>
       <Name>WebSharper.Testing</Name>
@@ -92,6 +104,14 @@
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Main\WebSharper.Main.fsproj">
       <Project>{a28d0cc6-9c9c-4438-81e2-0c21fb9549a3}</Project>
       <Name>WebSharper.Main</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\ProxyProjectTest.Proxy\ProxyProjectTest.Proxy.fsproj">
+      <Project>{25e7daf6-e287-4e5f-b596-fe4517761463}</Project>
+      <Name>ProxyProjectTest.Proxy</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\ProxyProjectTest\ProxyProjectTest.fsproj">
+      <Project>{24d8d80f-8536-4fdf-a8c2-fcd8cef57dca}</Project>
+      <Name>ProxyProjectTest</Name>
     </ProjectReference>
     <ProjectReference Include="..\WebSharper.Collections.Tests\WebSharper.Collections.Tests.fsproj">
       <Project>{bb4817e7-12a1-4622-b8ce-29cb3c406851}</Project>
@@ -149,7 +169,6 @@
     <DebugType>pdbonly</DebugType>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <ErrorReport>prompt</ErrorReport>
-    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <OutputPath>bin\</OutputPath>
@@ -179,16 +198,16 @@
     <When Condition="$(TargetFrameworkIdentifier) == '.NETFramework' And ($(TargetFrameworkVersion) == 'v4.6' Or $(TargetFrameworkVersion) == 'v4.6.1')">
       <ItemGroup>
         <Reference Include="FSharp.Core">
-          <HintPath>..\..\..\..\..\Users\jenkins.WIN-DRS439ROKOT\.nuget\packages\fsharp.core\4.2.2\lib\net45\FSharp.Core.dll</HintPath>
+          <HintPath>..\..\packages\includes\FSharp.Core\lib\net45\FSharp.Core.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>
       </ItemGroup>
     </When>
-    <When Condition="$(TargetFrameworkIdentifier) == '.NETStandard' And $(TargetFrameworkVersion) == 'v2.0'">
+    <When Condition="($(TargetFrameworkIdentifier) == '.NETCoreApp' And $(TargetFrameworkVersion) == 'v2.0') Or ($(TargetFrameworkIdentifier) == '.NETStandard' And $(TargetFrameworkVersion) == 'v2.0')">
       <ItemGroup>
         <Reference Include="FSharp.Core">
-          <HintPath>..\..\..\..\..\Users\jenkins.WIN-DRS439ROKOT\.nuget\packages\fsharp.core\4.2.2\lib\netstandard1.6\FSharp.Core.dll</HintPath>
+          <HintPath>..\..\packages\includes\FSharp.Core\lib\netstandard2.0\FSharp.Core.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>

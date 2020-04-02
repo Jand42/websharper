@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -79,8 +79,21 @@ type private AsyncProxy =
         As (C.StartChild (As a, timeOut))
 
     [<Inline>]
+    static member StartChildAsTask(a: Async<'T>, ?opt :System.Threading.Tasks.TaskCreationOptions) 
+        : Async<System.Threading.Tasks.Task<'T>> =
+        As (C.StartChildAsTask (As a))
+
+    [<Inline>]
     static member Parallel(cs: seq<Async<'T>>) : Async<'T []> =
         As (C.Parallel (As cs))
+
+    [<Inline>]
+    static member Parallel(cs: seq<Async<'T>>, ?d: int) : Async<'T []> =
+        As (C.ParallelWithMaxDegree (As cs) (Option.defaultValue 0 d))
+
+    [<Inline>]
+    static member Sequential(cs: seq<Async<'T>>) : Async<'T []> =
+        As (C.Sequential (As cs))
 
     [<Inline>]
     static member StartImmediate(c: Async<unit>, ?t: CT) : unit =
@@ -90,6 +103,11 @@ type private AsyncProxy =
     static member StartAsTask (a: Async<'T>, ?opt :System.Threading.Tasks.TaskCreationOptions, ?t: CT) 
         : System.Threading.Tasks.Task<'T> =
         C.StartAsTask(As a, As t)        
+
+    [<Inline>]
+    static member StartImmediateAsTask (a: Async<'T>, ?t: CT) 
+        : System.Threading.Tasks.Task<'T> =
+        C.StartImmediateAsTask(As a, As t)        
 
     [<Inline>]
     static member DefaultCancellationToken : CT =
@@ -112,6 +130,10 @@ type private AsyncProxy =
     [<Inline>]
     static member TryCancelled(p: Async<'T>, f: OCE -> unit) : Async<'T> =
         As (C.TryCancelled(As p, f))
+
+[<Proxy(typeof<Async<_>>)>]
+type private Async1Proxy<'T> =
+    class end
 
 [<Proxy(typeof<CT>)>]
 type private CancellationTokenProxy =

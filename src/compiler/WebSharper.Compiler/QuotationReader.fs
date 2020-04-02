@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -87,8 +87,6 @@ let withOptSourcePos (expr: Expr) (e: Expression) =
 exception ParseError of string
 let parsefailf x =
     Printf.kprintf (fun s -> raise <| ParseError s) x
-
-let errorPlaceholder = Value (String "$$ERROR$$")
 
 let rec transformExpression (env: Environment) (expr: Expr) =
     let inline tr x = transformExpression env x
@@ -272,7 +270,7 @@ let rec transformExpression (env: Environment) (expr: Expr) =
             | ParseError m -> m
             | _ -> "Error while reading F# quotation: " + e.Message //+ " " + e.StackTrace
         env.Compilation.AddError(getOptSourcePos expr, SourceError msg)
-        errorPlaceholder        
+        CompilationHelpers.errorPlaceholder        
 
 let readExpression (comp: Compilation) expr =
     transformExpression (Environment.New(comp)) expr

@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -290,12 +290,12 @@ type TypeBuilder(aR: WebSharper.Compiler.LoaderUtility.Resolver, out: AssemblyDe
         correctAttributeArg a.Argument
 
     let resolveAsm (asmName: string) (typeName: string) =
-        match assemblies.TryGetValue(asmName) with
+        match assemblies.TryGetValue(AssemblyName(asmName).Name) with
         | true, x -> x
         | false, _ ->
             let asm =
                 if isNetStandard && AssemblyConventions.IsNetStandardType typeName then corelib else
-                aR.Resolve(AssemblyNameReference.Parse(asmName))
+                aR.Resolve(asmName)
             assemblies.[asmName] <- asm
             asm
 
@@ -342,7 +342,10 @@ type TypeBuilder(aR: WebSharper.Compiler.LoaderUtility.Resolver, out: AssemblyDe
         let tDef = resolveTypeName assembly name
         genericInstance tDef ts
 
-    let funcType = resolveType typedefof<_ -> _>
+    // First resolve FSharp.Core without explicit version,
+    // so that the resolver can pick up the version from the passed references.
+    let fsharpCore = resolveAsm "FSharp.Core" "Microsoft.FSharp.Core.FSharpFunc`2"
+    let funcType = resolveTypeName fsharpCore "Microsoft.FSharp.Core.FSharpFunc`2"
     let attributeType = resolveType typeof<System.Attribute>
     let converterType = resolveType typedefof<System.Converter<_, _>>
     let objectType = resolveType typeof<obj>
@@ -700,7 +703,7 @@ type CompilerOptions =
         OutputPath : option<string>
         ProjectDir : string
         ReferencePaths : seq<string>
-        StrongNameKeyPair : option<StrongNameKeyPair>
+        StrongNameKeyPath : option<string>
     }
 
     static member Default(name) =
@@ -714,7 +717,7 @@ type CompilerOptions =
             OutputPath = None
             ProjectDir = "."
             ReferencePaths = Seq.empty
-            StrongNameKeyPair = None
+            StrongNameKeyPath = None
         }
 
     static member Parse args =
@@ -728,8 +731,7 @@ type CompilerOptions =
             | S "-v:" ver ->
                 { opts with AssemblyVersion = Version.Parse ver }
             | S "-snk:" path ->
-                let snk = StrongNameKeyPair(File.ReadAllBytes path)
-                { opts with StrongNameKeyPair = Some snk }
+                { opts with StrongNameKeyPath = Some path }
             | S "-embed:" path ->
                 { opts with EmbeddedResources = Seq.append opts.EmbeddedResources [path] }
             | S "-o:" out ->
@@ -819,17 +821,28 @@ type MemberConverter
         |]
 
     let staticMethodAttributes = MethodAttributes.Static ||| MethodAttributes.Public
+    let instanceMethodAttributes = MethodAttributes.Public
+    let ctorMethodAttributes = MethodAttributes.Public
     let interfaceMethodAttributes = MethodAttributes.Public ||| MethodAttributes.Abstract ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig ||| MethodAttributes.NewSlot
-    let overrideMethodAttributes = MethodAttributes.Public ||| MethodAttributes.Final ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig ||| MethodAttributes.NewSlot
+    let implementMethodAttributes = MethodAttributes.Public ||| MethodAttributes.Final ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig ||| MethodAttributes.NewSlot
+    let overrideMethodAttributes = MethodAttributes.Public ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig
+    let abstractMethodAttributes = MethodAttributes.Public ||| MethodAttributes.Abstract ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig ||| MethodAttributes.NewSlot
+    let virtualMethodAttributes = MethodAttributes.Public ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig ||| MethodAttributes.NewSlot
 
     let methodAttributes (dt: TypeDefinition) (x: Code.Entity) =
         match x with
-        | :? Code.Constructor -> MethodAttributes.Public
-        | :? Code.Member as m when m.IsStatic -> staticMethodAttributes
-        | :? Code.Method as m when m.IsOverride -> overrideMethodAttributes
-        | :? Code.Property as p when p.IsOverride -> overrideMethodAttributes
         | _ when dt.IsInterface -> interfaceMethodAttributes
-        | _ -> MethodAttributes.Public
+        | :? Code.Constructor -> ctorMethodAttributes
+        | :? Code.Member as m when m.IsStatic -> staticMethodAttributes
+        | :? Code.Method as m ->
+            match m.Kind with
+            | Code.Implementation -> implementMethodAttributes
+            | Code.NonVirtual -> instanceMethodAttributes
+            | Code.Virtual -> virtualMethodAttributes
+            | Code.Override -> overrideMethodAttributes
+            | Code.Abstract -> abstractMethodAttributes
+        | :? Code.Property as p when p.IsOverride -> overrideMethodAttributes
+        | _ -> instanceMethodAttributes
 
     let addConstructor (dT: TypeDefinition) (td: Code.TypeDeclaration) (x: Code.Constructor) =
         let overloads =
@@ -939,7 +952,7 @@ type MemberConverter
                     namesTaken.Add n |> ignore
                     let gP = GenericParameter(n, owner)
                     for c in g.Constraints do
-                        gP.Constraints.Add(tC.TypeReference (c, td))
+                        gP.Constraints.Add(GenericParameterConstraint(tC.TypeReference (c, td)))
                     owner.GenericParameters.Add(gP)
                     g.Id, gP
             ]        
@@ -961,8 +974,8 @@ type MemberConverter
             x.Type
             |> Type.GetOverloads
         let overloads = 
-            match x.Inline with
-            | Some (Code.BasicInline _) -> overloads |> List.collect Type.WithFSharpOverloads
+            match x.Kind, x.Inline with
+            | Code.NonVirtual, Some (Code.BasicInline _) -> overloads |> List.collect Type.WithFSharpOverloads
             | _ -> overloads |> List.collect Type.TransformArgs
         for t, isCSharp in overloads do
             match t with
@@ -987,20 +1000,30 @@ type MemberConverter
         for p in makeParameters (f, td, isCSharp) do
             mD.Parameters.Add p
         let isInterface = dT.IsInterface
-        let isMixin = isInterface && not (x.Inline.IsSome || x.Macro.IsSome) 
-        if isMixin then
+        let isAbstract =
+            if isInterface then
+                not (x.Inline.IsSome || x.Macro.IsSome)
+            else
+                match x.Kind with
+                | CodeModel.NonVirtual -> false
+                | CodeModel.Implementation -> x.Inline.IsNone
+                | CodeModel.Override | CodeModel.Abstract | CodeModel.Virtual ->
+                    if x.Inline.IsSome then
+                        failwithf "Cannot create abstract or virtual method with inline: %s on %s" x.Name dT.Name
+                    true
+        if not isInterface then
+            mB.AddBody mD
+        if isAbstract then
             x.Name
             |> nameAttribute
             |> mD.CustomAttributes.Add
         else
-            if not isInterface then
-                mB.AddBody mD
             match x.Macro with
             | Some macro ->
                 tC.TypeReference (macro, td)
                 |> macroAttribute
                 |> mD.CustomAttributes.Add
-            | _ -> 
+            | _ ->
                 iG.GetMethodBaseInline(td, t, x)
                 |> inlineAttribute
                 |> mD.CustomAttributes.Add
@@ -1035,6 +1058,8 @@ type MemberConverter
         genericType x (fun c tD -> c.Class(x, tD))
 
     member private c.Class(x: Code.Class, tD: TypeDefinition) =
+        if x.IsAbstract then
+            tD.IsAbstract <- true
         do
             match x.BaseClass with
             | None -> tD.BaseType <- tB.Object
@@ -1044,7 +1069,11 @@ type MemberConverter
             | None -> ()
             | Some c -> comments.[tD] <- c
         for i in x.ImplementedInterfaces do
-            tD.Interfaces.Add(InterfaceImplementation(tC.TypeReference (i, x)))
+            let tr = tC.TypeReference (i, x)
+            if tr.Resolve().IsInterface then
+                tD.Interfaces.Add(InterfaceImplementation(tr))
+            else
+                failwithf "Class %s is trying to implement a non-interface type: %s" x.Name tr.FullName
         for ctor in x.Constructors do
             addConstructor tD x ctor
         setObsoleteAttribute x tD.CustomAttributes
@@ -1055,7 +1084,11 @@ type MemberConverter
 
     member private c.Interface(x: Code.Interface, tD: TypeDefinition) =
         for i in x.BaseInterfaces do
-            tD.Interfaces.Add(InterfaceImplementation(tC.TypeReference (i, x)))
+            let tr = tC.TypeReference (i, x)
+            if tr.Resolve().IsInterface then
+                tD.Interfaces.Add(InterfaceImplementation(tr))
+            else
+                failwithf "Interface %s is trying to inherit a non-interface type: %s" x.Name tr.FullName
         setObsoleteAttribute x tD.CustomAttributes
         c.AddTypeMembers(x, tD)
         do
@@ -1225,14 +1258,10 @@ type XmlDocGenerator(assembly: AssemblyDefinition, comments: Comments) =
 type CompiledAssembly(def: AssemblyDefinition, doc: XmlDocGenerator, options: CompilerOptions, tB: TypeBuilder) =
 
     let writerParams =
-        match options.StrongNameKeyPair with
+        match options.StrongNameKeyPath with
         | None -> WriterParameters()
         | Some p ->
-#if NET461 // TODO dotnet: strong naming
-            WriterParameters(StrongNameKeyPair = p)
-#else
-            WriterParameters()
-#endif
+            WriterParameters(StrongNameKeyBlob = File.ReadAllBytes p)
 
     member a.GetBytes() =
         use out = new MemoryStream()
@@ -1357,6 +1386,7 @@ type Compiler() =
             types.[getId x] <- tD
             def.MainModule.Types.Add(tD)
         let buildType attrs ns sourceName (x: Code.TypeDeclaration) =
+            let attrs = if x.IsAbstract then attrs ||| TypeAttributes.Abstract else attrs
             build attrs ns sourceName x
             match x.Generics.Length with
             | 0 -> ()
@@ -1365,6 +1395,7 @@ type Compiler() =
             match types.TryGetValue parent.Id with
             | true, parent ->
                 let attrs = attrs ||| TypeAttributes.NestedPublic
+                let attrs = if x.IsAbstract then attrs ||| TypeAttributes.Abstract else attrs
                 let tD = TypeDefinition(null, sourceName, attrs)
                 tD.DeclaringType <- parent
                 types.[getId x] <- tD
@@ -1373,16 +1404,13 @@ type Compiler() =
                 | 0 -> ()
                 | gs -> genTypes.[getId x] <- gs 
             | _ -> ()
-        let interf =
-            TypeAttributes.Interface
-            ||| TypeAttributes.Abstract
         assembly
         |> visit
             (buildType TypeAttributes.Class)
-            (buildType interf)
+            (buildType TypeAttributes.Interface)
             (build TypeAttributes.Class)
             (buildNested TypeAttributes.Class)
-            (buildNested interf)
+            (buildNested TypeAttributes.Interface)
         types, genTypes
 
     let buildAssembly resolver options (assembly: Code.Assembly) =

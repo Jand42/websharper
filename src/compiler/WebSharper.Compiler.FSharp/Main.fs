@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -20,9 +20,10 @@
 
 namespace WebSharper.Compiler.FSharp
 
-open Microsoft.FSharp.Compiler.SourceCodeServices
+open FSharp.Compiler.SourceCodeServices
 open WebSharper.Compiler.FrontEnd
 open WebSharper.Compiler.CommandTools
+open ErrorPrinting
 
 open System.IO
 
@@ -39,6 +40,7 @@ type WebSharperFSharpCompiler(logger, ?checker) =
 
     member val UseGraphs = true with get, set
     member val UseVerifier = true with get, set
+    member val WarnSettings = WarnSettings.Default with get, set
 
     member this.Compile (prevMeta : System.Threading.Tasks.Task<option<M.Info>>, argv, config: WsConfig, assemblyName) = 
         let path = config.ProjectFile
@@ -74,20 +76,23 @@ type WebSharperFSharpCompiler(logger, ?checker) =
 
         TimedStage "Waiting on merged metadata"
 
-        if checkProjectResults.HasCriticalErrors then
+        if checkProjectResults.Errors |> Array.exists (fun e -> e.Severity = FSharpErrorSeverity.Error && not (this.WarnSettings.NoWarn.Contains e.ErrorNumber)) then
+            if assemblyName = "WebSharper.Main" || config.ProjectType = Some BundleOnly then
+                PrintFSharpErrors this.WarnSettings checkProjectResults.Errors
             None
         else
         
         let comp = 
             WebSharper.Compiler.FSharp.ProjectReader.transformAssembly
-                (WebSharper.Compiler.Compilation(refMeta, this.UseGraphs))
+                (WebSharper.Compiler.Compilation(refMeta, this.UseGraphs, SingleNoJSErrors = config.SingleNoJSErrors))
                 assemblyName
                 config
                 checkProjectResults
 
         WebSharper.Compiler.Translator.DotNetToJavaScript.CompileFull comp
         
-        comp.VerifyRPCs()
+        if this.UseVerifier then
+            comp.VerifyRPCs()
             
         TimedStage "WebSharper translation"
 

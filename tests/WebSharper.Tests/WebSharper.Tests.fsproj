@@ -1,15 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
     <WebSharperProject>Library</WebSharperProject>
+    <WebSharperConfigFile>testwsconfig.json</WebSharperConfigFile>
+    <!-- Test #645: accept string nowarn arguments -->
+    <OtherFlags>--nowarn:FS0044 --nowarn:TEST1234</OtherFlags>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Collections.fs" />
+    <Compile Include="Dependencies.fs" />
     <Compile Include="AddressOf.fs" />
     <Compile Include="Array.fs" />
     <Compile Include="Array2D.fs" />
     <Compile Include="Async.fs" />
     <Compile Include="Basis.fs" />
     <Compile Include="Char.fs" />
+    <Compile Include="Conversions.fs" />
     <Compile Include="DateTime.fs" />
     <Compile Include="Delegate.fs" />
     <Compile Include="Double.fs" />
@@ -23,6 +30,7 @@
     <Compile Include="List.fs" />
     <Compile Include="Macro.fs" />
     <Compile Include="Math.fs" />
+    <Compile Include="MathJS.fs" />
     <Compile Include="Nullable.fs" />
     <Compile Include="Object.fs" />
     <Compile Include="ObjExpr.fs" />
@@ -42,14 +50,17 @@
     <Compile Include="String.fs" />
     <Compile Include="Task.fs" />
     <Compile Include="TimeSpan.fs" />
+    <Compile Include="ValueOption.fs" />
     <Compile Include="Printf.fs" />
     <Compile Include="Tupled.fs" />
     <Compile Include="WIG.fs" />
     <Compile Include="Cookies.fs" />
+    <Compile Include="Promise.fs" />
     <Compile Include="Compiler.fs" />
     <Compile Include="Main.fs" />
     <None Include="ASTTests.fsx" />
     <None Include="paket.references" />
+    <Content Include="wsconfig.json" />
   </ItemGroup>
   <ItemGroup Condition="$(TargetFramework.StartsWith('net4'))">
     <ProjectReference Include="..\..\src\compiler\WebSharper.Compiler\WebSharper.Compiler.fsproj" />
@@ -59,15 +70,19 @@
     <ProjectReference Include="..\..\src\compiler\WebSharper.Core\WebSharper.Core.fsproj" />
     <ProjectReference Include="..\..\src\sitelets\WebSharper.Web\WebSharper.Web.fsproj" />
     <ProjectReference Include="..\..\src\stdlib\WebSharper.JavaScript\WebSharper.JavaScript.fsproj" />
+    <ProjectReference Include="..\..\src\stdlib\WebSharper.MathJS\WebSharper.MathJS.fsproj" />
+    <ProjectReference Include="..\..\src\stdlib\WebSharper.MathJS.Extensions\WebSharper.MathJS.Extensions.fsproj" />
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Collections\WebSharper.Collections.fsproj" />
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Control\WebSharper.Control.fsproj" />
+    <ProjectReference Include="..\ProxyProjectTest.Proxy\ProxyProjectTest.Proxy.fsproj" />
+    <ProjectReference Include="..\ProxyProjectTest\ProxyProjectTest.fsproj" />
+    <ProjectReference Include="..\WebSharper.CSharp.Tests\WebSharper.CSharp.Tests.csproj" />
     <ProjectReference Include="..\WebSharper.Web.Tests\WebSharper.Web.Tests.fsproj" />
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Testing\WebSharper.Testing.fsproj" />
     <ProjectReference Include="..\..\src\stdlib\WebSharper.Main\WebSharper.Main.fsproj" />
     <ProjectReference Include="..\WebSharper.Collections.Tests\WebSharper.Collections.Tests.fsproj" />
     <ProjectReference Include="..\WebSharper.InterfaceGenerator.Tests\WebSharper.InterfaceGenerator.Tests.fsproj" />
     <Reference Include="System.Data, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
-    <Reference Include="System.Data.Linq, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
   </ItemGroup>
   <Import Project="..\..\msbuild\WebSharper.FSharp.Internal.targets" />
   <Import Project="..\..\.paket\Paket.Restore.targets" />

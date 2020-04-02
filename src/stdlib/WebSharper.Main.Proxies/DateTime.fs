@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -26,7 +26,7 @@ open System
 
 type private D = System.DateTime
 type private K = System.DateTimeKind
-type private TS = System.TimeSpan
+type internal TS = System.TimeSpan
 type private DO = System.DateTimeOffset
 
 [<JavaScript>]
@@ -256,6 +256,12 @@ type private DateTimeProxy =
 
     [<Inline "$a <= $b">]
     static member op_LessThanOrEqual (a: D, b: D) = X<bool>
+
+    [<Inline "new Date($y, $mo, 0).getDate()">]
+    static member DaysInMonth (y: int, mo: int) = X<int>
+
+    [<Inline "new Date($y, 1, 29).getDate() == 29">]
+    static member IsLeapYear (y: int) = X<bool>
 
 [<Proxy(typeof<System.DateTimeOffset>)>]
 [<Prototype false>]

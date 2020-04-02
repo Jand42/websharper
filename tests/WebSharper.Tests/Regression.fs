@@ -395,6 +395,121 @@ module Bug923 =
     let addFloatsWithMeasures (a: float<'a>) (b: float<'a>) = a + b
 
 [<JavaScript>]
+module Bug944 =
+    type IFoo = 
+        abstract member Fooey : string -> unit
+
+    let AsFoo m = 
+        match box m with
+        | :? IFoo as f -> Some f
+        | _ -> None
+
+    let CheckNonPure m =
+        let r = ref 0
+        if (incr r; box m) :? IFoo then Some !r else None
+
+[<JavaScript>]
+module Bug948 =
+    type MyType =
+        | [<Constant(null)>] NullCase
+        | NonNullCase
+    
+    let f (x: Union<Dom.Node, MyType>) =
+        match x with
+        | Union1Of2 _ -> "it's not my type"
+        | Union2Of2 _ -> "it's my type"
+    
+    let test() =
+        f (Union2Of2 NullCase)
+
+[<JavaScript>]
+module Bug951 =
+    // this was previously failing to compile
+    type Foo() =
+        static let hey = 43
+        abstract member clone: unit -> Foo
+        default __.clone() = new Foo()
+
+    // this was previously not renaming "Value" abstract name to not collide
+    // with fixed name in subtype
+    [<AbstractClass>]
+    type A() =
+        abstract Value: int
+
+    type B() =
+        inherit A()
+        [<Name "get_Value">]
+        member this.ValueB = 2
+        override this.Value = 1 
+
+    // this should cause a compile-time error:
+    //[<AbstractClass>]
+    //type A() =
+    //    [<Name "Value">]
+    //    abstract Value: int
+
+    //type B() =
+    //    inherit A()
+    //    [<Name "Value">]
+    //    member this.ValueB = 2
+    //    override this.Value = 1 
+
+[<JavaScript>]
+module Bug991 =
+    type Foo = int
+
+    type IFooey = 
+        abstract member ToFoo: string -> Foo
+        abstract member FromFoo: Foo -> string
+
+    type FooBase() =
+        interface IFooey with
+            override __.ToFoo s = 42 
+            override __.FromFoo x = "meh"
+
+    type Footacular() =
+        inherit FooBase()
+
+        interface IFooey with
+            override __.ToFoo s = 42
+            override __.FromFoo x = "wee"
+
+/// Regression would make this fail at compile time
+[<JavaScript>]
+type Bug1010() =
+    inherit WebSharper.InterfaceGenerator.Tests.Regression1010.B()
+
+/// Regression would make this fail at compile time
+[<JavaScript>]
+module Bug1051 =
+    type Base<'T> (x: 'T) = 
+        class end
+
+    type Sub() as this =
+        inherit Base<unit>(())
+    
+        member __.A() = ()
+        member __.B() = this.A()
+
+/// Regression would make this fail at compile time
+[<JavaScript>]
+module Bug1074 =
+    type  Val<'P> = VView of ref<'P> | VConst of 'P
+        with
+        [<Inline>] static member ( <* )(vf:Val<'a->'b> , a :    'a ) = VConst a
+        [<Inline>] static member ( <* )(vf:Val<'a->'b> , aV:ref<'a>) = VView  aV
+
+    let add1 a = a + 1
+    let a11V = ref 11
+
+    let mainX = VConst add1 <* a11V
+
+/// Regression would make this fail at compile time
+[<JavaScript>]
+module Bug1091 =
+    let foo = [| (try (0).ToString() with e -> e.ToString()) |]
+
+[<JavaScript>]
 let Tests =
     TestCategory "Regression" {
 
@@ -592,7 +707,6 @@ let Tests =
             equal (1445122700705L / 32L) 45160084397L
         }
 
-#if FSHARP40
         Test "Bug #477 (mutable in closure)" {
             let f, g =
                 let mutable x = 0
@@ -601,7 +715,6 @@ let Tests =
             do f()
             equalMsg (g()) 1 "After modifying"
         }
-#endif
 
         Test "Bug #479" {
             let test () =
@@ -828,7 +941,7 @@ let Tests =
             let x = TestConfigObj()
             x.Value <- 4
             equal x?value 4
-            isFalse x.X
+            equal x.X JS.Undefined
             x.X <- true
             isTrue x.X
         }
@@ -871,7 +984,36 @@ let Tests =
             equal (Bug914.f 42) "42"
         }
 
+        Test "#944 Interface type test on non-object value" {
+            equal (Bug944.AsFoo 42) None
+            let x = { new Bug944.IFoo with member __.Fooey _ = () }
+            equal (Bug944.CheckNonPure x) (Some 1)
+        }
+
+        Test "#948 Erased union pattern matching fails on a union with a [<Constant null>] case" {
+            equal (Bug948.test()) "it's my type"
+        }
+
+        Test "#951 abstract method key collisions and renaming fixes" {
+            equal (Bug951.B().Value) 1
+            equal (Bug951.B().ValueB) 2
+            equal (Bug951.B()?get_Value()) 2
+        }
+
+        Test "#991 Overriding interface implementations" {
+            equal ((Bug991.FooBase() :> Bug991.IFooey).FromFoo(0)) "meh"
+            equal ((Bug991.Footacular() :> Bug991.IFooey).FromFoo(0)) "wee"
+        }
+
         //Test "Recursive module value" {
         //    equal (moduleFuncValue 0) 5
         //}
+
+        Test "#1010 WIG inheritance" {
+            equal (Bug1010().M()) 42
+        }
+
+        Test "#1074 Ambiguity at translating trait call" {
+            equal Bug1074.mainX (Bug1074.VView (ref 11))
+        }
     }

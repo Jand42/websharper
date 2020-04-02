@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -56,16 +56,18 @@ module AssemblyUtility =
         else
             None
 
+    let HasWebSharperMetadata (a: Mono.Cecil.AssemblyDefinition) =
+        let key = EMBEDDED_METADATA
+        a.MainModule.Resources
+        |> Seq.exists (function
+            | :? Mono.Cecil.EmbeddedResource as r when r.Name = key -> true
+            | _ -> false)
+
     let IsWebSharperAssembly (a: Mono.Cecil.AssemblyDefinition) =
         match a.Name.Name with
         | "WebSharper.Core.JavaScript" -> true
         | n when n.Contains("WebSharper") -> true
-        | _ ->
-            let key = EMBEDDED_METADATA
-            a.MainModule.Resources
-            |> Seq.exists (function
-                | :? Mono.Cecil.EmbeddedResource as r when r.Name = key -> true
-                | _ -> false)
+        | _ -> HasWebSharperMetadata a
 
     let ParseWebResourcesUnchecked (def: Mono.Cecil.AssemblyDefinition) =
         def.CustomAttributes
@@ -106,21 +108,19 @@ type Assembly =
 
     member this.OutputParameters(keyPair) =
         let par = Mono.Cecil.WriterParameters()
-#if NET461 // TODO dotnet: strong naming
         match keyPair with
-        | Some kp -> par.StrongNameKeyPair <- kp
+        | Some kp -> par.StrongNameKeyBlob <- kp
         | None -> ()
-#endif
         par
 
-    member this.RawBytes(kP: option<StrongNameKeyPair>) =
+    member this.RawBytes(kP: option<byte[]>) =
         use s = new System.IO.MemoryStream(16 * 1024)
         this.Definition.Write(s, this.OutputParameters kP)
         s.ToArray()
 
     member this.Symbols = this.Debug
 
-    member this.Write(kP: option<StrongNameKeyPair>)(path: string) =
+    member this.Write(kP: option<byte[]>)(path: string) =
         let par = this.OutputParameters kP
         match this.Debug with
         | Some (Mdb _) ->
@@ -146,6 +146,9 @@ type Assembly =
 
     member this.TypeScriptDeclarations =
         ReadResource EMBEDDED_DTS this.Definition
+
+    member this.HasWebSharperMetadata =
+        HasWebSharperMetadata this.Definition
 
     static member Create(def, ?loadPath, ?symbols) =
         {

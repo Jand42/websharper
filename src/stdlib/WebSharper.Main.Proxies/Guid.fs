@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -40,7 +40,7 @@ type internal GuidProxy =
     static member Empty = X<System.Guid>
 
     [<Inline "$this">]
-    member this.ToString() = X<string>
+    override this.ToString() = X<string>
 
     [<Inline "$a == $b">]
     static member op_Equality(a: System.Guid, b: System.Guid) = X<bool>

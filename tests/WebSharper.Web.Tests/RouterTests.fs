@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -21,6 +21,7 @@
 namespace WebSharper.Sitelets.Tests
 
 open WebSharper
+open WebSharper.JavaScript
 open WebSharper.Testing
 open WebSharper.Sitelets
 open PerformanceTests
@@ -32,7 +33,7 @@ module ClientServerTests =
     let ShiftedRouter = 
         Router.Shift "perf-tests" <| Router.Infer<Action>()
 
-    let Tests apiBaseUri =
+    let Tests apiBaseUri corsBaseUri runServerTests =
         let parse router p =
             Route.FromUrl(p) |> Router.Parse router    
         let parseHash router p =
@@ -52,11 +53,12 @@ module ClientServerTests =
             | UJsonInt _
             | UFormData _
             | UMultiFormData _
+            | UCors _
                 -> true
             | _ -> false
 
         TestCategory "Sitelets Client-server routing" {
-            Test "compatibility tests" {
+            TestIf runServerTests "compatibility tests" {
                 let! serverResults = GetTestValues()
                 let! extraServerResults = GetExtraTestValues()
                 let testValues = serverResults |> Array.map (fun (testValue, _, _) -> testValue)
@@ -81,7 +83,13 @@ module ClientServerTests =
                 )
             }
 
-            Test "Router.Ajax" {
+            TestIf runServerTests "Router.Ajax" {
+                let settings ep =
+                    let s = JQuery.AjaxSettings()
+                    match ep with
+                    | UCors _ -> corsBaseUri |> Option.iter (fun uri -> s.Url <- uri)
+                    | _ -> ()
+                    s
                 let! serverResults = GetTestValues()
                 let! ajaxResults =
                     async {
@@ -89,19 +97,42 @@ module ClientServerTests =
                         for testValue, _, _ in serverResults do
                             try
                                 do! Expect testValue
-                                let! res = Router.Ajax ShiftedRouter testValue
-                                arr.Add (box res)
+                                let! res = Router.AjaxWith (settings testValue) ShiftedRouter testValue
+                                arr.Add (res)
                             with e ->
-                                arr.Add (box e.StackTrace)
+                                arr.Add (e.StackTrace)
                         return arr.ToArray()
                     }
-                let expectedResults =
-                    serverResults |> Array.map (fun (_, serverLink, _) ->
-                        box serverLink
-                    )
-                forEach (Array.zip ajaxResults expectedResults) (fun (r, v) ->
-                    Do { equalMsg r v (sprintf "Ajax call for: " + string v) }
-                )
+                let expectedResults = serverResults |> Array.map (fun (_, serverLink, _) -> serverLink)
+                forEach (Array.zip ajaxResults expectedResults) (fun (r, v) -> Do {
+                    equalMsg r v (sprintf "Ajax call for: " + string v)
+                })
+            }
+
+            TestIf runServerTests "Router.Fetch" {
+                let baseUri ep =
+                    match ep with
+                    | UCors _ -> corsBaseUri
+                    | _ -> None
+                let! serverResults = GetTestValues()
+                let! ajaxResults =
+                    async {
+                        let arr = ResizeArray()
+                        for testValue, _, _ in serverResults do
+                            try
+                                do! Expect testValue
+                                let! res = Router.FetchWith (baseUri testValue) (RequestOptions()) ShiftedRouter testValue
+                                            |> JavaScript.Promise.AsAsync
+                                let! text = res.Text() |> JavaScript.Promise.AsAsync
+                                arr.Add (text)
+                            with e ->
+                                arr.Add (e.StackTrace)
+                        return arr.ToArray()
+                    }
+                let expectedResults = serverResults |> Array.map (fun (_, serverLink, _) -> serverLink)
+                forEach (Array.zip ajaxResults expectedResults) (fun (r, v) -> Do {
+                    equalMsg r v (sprintf "Fetch call for: " + string v)
+                })
             }
 
             Test "Router primitives" {
@@ -117,10 +148,10 @@ module ClientServerTests =
                 equal (parseHash rUnit "#") (Some ())
                 equal (parseHash rUnit "#/") (Some ())
                 equal (Router.HashLink rInt 2) "#/2"
-                equal (parseHash rInt "#/2") (Some 2)                
+                equal (parseHash rInt "#/2") (Some 2)     
             }
 
-            Test "Router combinator" {
+            TestIf runServerTests "Router combinator" {
                 let! testValuesAndServerLinks = CombinatorTests.GetTestValues()
                 let testValuesAndClientLinks =
                     testValuesAndServerLinks |> Array.map (fun (testValue, _) ->
@@ -128,10 +159,15 @@ module ClientServerTests =
                     )
                 equal testValuesAndServerLinks testValuesAndClientLinks
             }
+
+            TestIf runServerTests "#940 'GET /' union case" {
+                let! errOpt = Bug940.Test()
+                equal errOpt None
+            }
         }
 
-    let RunTests apiBaseUri =
+    let RunTests apiBaseUri corsBaseUri runServerTests =
         Runner.RunTests [|
-            Tests apiBaseUri
+            Tests apiBaseUri corsBaseUri runServerTests
         |]
 

@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -142,11 +142,14 @@ let SeqChunkBySize (size: int) (s: seq<'T>) =
     if size <= 0 then failwith "Chunk size must be positive"
     Enumerable.Of <| fun () ->
         let o = Enumerator.Get s
-        Enumerator.NewDisposing () (fun _ -> o.Dispose()) <| fun e ->
-            if o.MoveNext() then
+        Enumerator.NewDisposing true (fun _ -> o.Dispose()) <| fun e ->
+            if e.State && o.MoveNext() then
                 let res = [|o.Current|]
-                while res.Length < size && o.MoveNext() do 
-                    res.JS.Push o.Current |> ignore
+                while e.State && res.Length < size do
+                    if o.MoveNext() then
+                        res.JS.Push o.Current |> ignore
+                    else 
+                        e.State <- false
                 e.Current <- res
                 true
             else false
@@ -241,3 +244,20 @@ let rec ListSkipWhile<'T> (predicate : 'T -> bool) (list : list<'T>) : list<'T> 
 [<Name "WebSharper.Seq.nonNegative">]
 let InputMustBeNonNegative() =
     failwith "The input must be non-negative."
+
+[<Name "WebSharper.Arrays.transposeArray">]
+let ArrayTranspose (array:'T[][]) : 'T[][] =
+    let len = array.Length
+    if len = 0 then [||] else
+    let lenInner = array.[0].Length
+
+    for j in 1..len-1 do
+        if lenInner <> array.[j].Length then
+            failwith "The arrays have different lengths."
+
+    let result = Array lenInner
+    for i in 0..lenInner-1 do
+        result.[i] <- Array len
+        for j in 0..len-1 do
+            result.[i].[j] <- array.[j].[i]
+    As result

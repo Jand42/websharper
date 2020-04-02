@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -441,7 +441,7 @@ type CSharpInlineControl(elt: System.Linq.Expressions.Expression<Func<IControlBo
             if funcName.Length = 0 then
                 let declType, meth, reqs = snd bodyAndReqs
                 let fail() =
-                    failwithf "Error in InlineControl: Couldn't find translation of method %s.%s. The method or type should have JavaScript attribute or a proxy, and the project file needs to include Zafir.CSharp.targets" 
+                    failwithf "Error in InlineControl: Couldn't find translation of method %s.%s. The method or type should have JavaScript attribute or a proxy, and the project file needs to include WebSharper.CSharp.targets" 
                         declType.Value.FullName meth.Value.MethodName
                 match meta.Classes.TryFind declType with
                 | None -> fail()

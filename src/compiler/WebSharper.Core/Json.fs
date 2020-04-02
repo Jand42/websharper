@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -601,6 +601,19 @@ let serializers =
             | _ -> raise (DecoderException(String g, typeof<System.Guid>))
         | x -> raise (DecoderException(x, typeof<System.Guid>))
     add encGuid decGuid d   
+    let encDecimal (d: decimal) =
+        let b = System.Decimal.GetBits(d)
+        EncodedArrayInstance (
+            AST.Address [ "Decimal"; "WebSharper" ], 
+            b |> Seq.map (string >> EncodedNumber) |> List.ofSeq
+        )
+    let decDecimal = function
+        | Object [ "mathjs", String "BigNumber"; "value", String d ] as x ->
+            match System.Decimal.TryParse d with
+            | true, d -> d
+            | _ -> raise (DecoderException(x, typeof<decimal>)) 
+        | x -> raise (DecoderException(x, typeof<decimal>))
+    add encDecimal decDecimal d   
     d
 
 let tupleEncoder dE (i: FormatSettings) (ta: TAttrs) =
@@ -1072,6 +1085,10 @@ let fieldFlags =
     ||| System.Reflection.BindingFlags.Public
     ||| System.Reflection.BindingFlags.NonPublic
 
+let fieldFlagsDeclOnly =
+    fieldFlags
+    ||| System.Reflection.BindingFlags.DeclaredOnly
+
 exception NoEncodingException of System.Type with
     override this.Message =
         "No JSON encoding for " + string this.Data0
@@ -1079,13 +1096,22 @@ exception NoEncodingException of System.Type with
 type FS = System.Runtime.Serialization.FormatterServices
 
 let getObjectFields (t: System.Type) =
-    t.GetFields fieldFlags
-    |> Seq.filter (fun f ->
-        let nS =
-            f.Attributes &&&
-            System.Reflection.FieldAttributes.NotSerialized
-        f.DeclaringType.IsSerializable && int nS = 0)
-    |> Seq.toArray
+    // FlattenHierarchy flag is not enough to collect
+    // backing fields of auto-properties on base classes 
+    let getDecl (t: System.Type) = 
+        t.GetFields fieldFlagsDeclOnly
+        |> Seq.filter (fun f ->
+            let nS =
+                f.Attributes &&&
+                System.Reflection.FieldAttributes.NotSerialized
+            int nS = 0
+        )
+    let rec getAll (t: System.Type) =
+        match t.BaseType with
+        | null -> Seq.empty // this is a System.Object
+        | b when b.FullName = "System.Web.UI.Control" -> Seq.empty // Don't serialize web control private fields
+        | b -> Seq.append (getAll b) (getDecl t)
+    getAll t |> Array.ofSeq
 
 let unmakeFlatDictionary<'T> (dE: obj -> Encoded) (x: obj) =
     EncodedObject [
@@ -1126,8 +1152,6 @@ let objectEncoder dE (i: FormatSettings) (ta: TAttrs) =
             callGeneric <@ unmakeFlatDictionary @> dE ta ga.[1]
         else
             callGeneric2 <@ unmakeArrayDictionary @> dE ta ga.[0] ga.[1]
-    elif not t.IsSerializable then
-        raise (NoEncodingException t)
     else
     let fs = getObjectFields t
     let ms = fs |> Array.map (fun x -> x :> System.Reflection.MemberInfo)
@@ -1175,6 +1199,26 @@ let makeArrayDictionary<'K, 'V when 'K : equality> (dK: Value -> obj) (dV: Value
         box d
     | x -> raise (DecoderException(x, typeof<Dictionary<'K,'V>>))
 
+let rec decodeObj value =
+    match value with
+    | Null -> null
+    | True -> box true
+    | False -> box false
+    | Number x ->
+        match System.Int32.TryParse x with
+        | true, n -> box n
+        | false, _ ->
+            match System.Double.TryParse x with
+            | true, f -> box f
+            | false, _ -> raise (DecoderException(value, typeof<obj>))
+    | String s -> box s
+    | Array xs ->
+        box [| for x in xs -> decodeObj x |]
+    | Object xs ->
+        let d = Dictionary()
+        for k, v in xs do d.Add(k, decodeObj v)
+        box d
+
 let objectDecoder dD (i: FormatSettings) (ta: TAttrs) =
     let t = ta.Type
     if t = typeof<System.DateTime> then
@@ -1217,8 +1261,8 @@ let objectDecoder dD (i: FormatSettings) (ta: TAttrs) =
             callGeneric <@ makeFlatDictionary @> dD ta ga.[1]
         else
             callGeneric2 <@ makeArrayDictionary @> dD ta ga.[0] ga.[1]
-    elif not t.IsSerializable then
-        raise (NoEncodingException t)
+    elif t = typeof<obj> then
+        decodeObj
     elif t.IsValueType then
         let fs = t.GetFields fieldFlags
         match t.GetConstructor (fs |> Array.map (fun f -> f.FieldType)) with
@@ -1710,7 +1754,11 @@ let getEncoding e wrap (fo: FormatSettings) (cache: ConcurrentDictionary<_,_>) =
                     | Some "System.Nullable`1" -> e.Nullable dD fo ta
                     | _ -> 
                         e.Object dD fo ta
-            with e -> fun _ -> raise (System.Exception("Error during RPC JSON conversion", e))
+            with
+            | NoEncodingException t ->
+                reraise()
+            | e ->
+                fun _ -> raise (System.Exception("Error during RPC JSON conversion", e))
         if ta.Type = null then raise (NoEncodingException ta.Type) else
             match serializers.TryGetValue ta.Type with
             | true, x when Option.isSome (e.Scalar x) ->
@@ -1755,7 +1803,6 @@ let inferUnionTag t =
         table |> List.tryPick (fun (name, tag) ->
             get name |> Option.map (fun _ -> tag))
     findInTable (inferredCasesTable t)
-        
 
 let defaultEncodeUnionTag _ (tag: int) =
     Some ("$", EncodedNumber (string tag))

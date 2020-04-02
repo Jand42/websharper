@@ -1,4 +1,23 @@
-﻿#I __SOURCE_DIRECTORY__
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you
+// may not use this file except in compliance with the License.  You may
+// obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.  See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// $end{copyright}
+#I __SOURCE_DIRECTORY__
 #r "../../build/Release/FSharp/net461/FSharp.Compiler.Service.dll"
 #r "../../build/Release/FSharp/net461/Mono.Cecil.dll"
 #r "../../build/Release/FSharp/net461/Mono.Cecil.Mdb.dll"
@@ -6,7 +25,6 @@
 #r "System.Configuration.dll"
 #r "System.Core.dll"
 #r "System.Data.dll"
-#r "System.Data.Linq.dll"
 #r "System.dll"
 #r "System.Numerics.dll"
 #r "System.Web.dll"
@@ -24,13 +42,13 @@
 #r "../../build/Release/FSharp/net461/WebSharper.Compiler.dll"
 #r "../../build/Release/FSharp/net461/WebSharper.Compiler.FSharp.dll"
 
-fsi.ShowDeclarationValues = false
+fsi.ShowDeclarationValues <- false
 
 open System
 open System.IO
 open System.Collections.Generic
-open Microsoft.FSharp.Compiler
-open Microsoft.FSharp.Compiler.SourceCodeServices
+open FSharp.Compiler
+open FSharp.Compiler.SourceCodeServices
 
 // Create an interactive checker instance 
 let checker = FSharpChecker.Create(keepAssemblyContents=true)
@@ -61,11 +79,16 @@ module Utils =
         | BasicPatterns.NewRecord(v,args) -> 
             let fields = v.TypeDefinition.FSharpFields
             "{" + ((fields, args) ||> Seq.map2 (fun f a -> f.Name + " = " + printExpr 0 a) |> String.concat "; ") + "}" 
+        | BasicPatterns.NewAnonRecord(v,args) -> 
+            "{| ... |}"
+            //let fields = v.TypeDefinition.FSharpFields
+            //"{|" + ((fields, args) ||> Seq.map2 (fun f a -> f.Name + " = " + printExpr 0 a) |> String.concat "; ") + "|}" 
         | BasicPatterns.NewTuple(v,args) -> printTupledArgs args 
         | BasicPatterns.NewUnionCase(ty,uc,args) -> uc.CompiledName + printTupledArgs args 
         | BasicPatterns.Quote(e1) -> "quote" + printTupledArgs [e1]
-        | BasicPatterns.FSharpFieldGet(obj, ty,f) -> printObjOpt obj + f.Name 
+        | BasicPatterns.FSharpFieldGet(obj, ty,f) -> printObjOpt obj + "." + f.Name 
         | BasicPatterns.FSharpFieldSet(obj, ty,f,arg) -> printObjOpt obj + f.Name + " <- " + printExpr 0 arg
+        | BasicPatterns.AnonRecordGet(obj, ty, index) -> printExpr 10 obj + "." + ty.AnonRecordTypeDetails.SortedFieldNames.[index] 
         | BasicPatterns.Sequential(e1,e2) -> "(" + printExpr 0 e1 + "; " + printExpr 0 e2 + ")"
         | BasicPatterns.ThisValue _ -> "this"
         | BasicPatterns.TryFinally(e1,e2) -> "try " + printExpr 0 e1 + " finally " + printExpr 0 e2
@@ -332,6 +355,10 @@ let translate source =
     let options =  checker.GetProjectOptionsFromCommandLineArgs (projFileName, args)
 
     let wholeProjectResults = checker.ParseAndCheckProject(options) |> Async.RunSynchronously
+    if wholeProjectResults.Errors.Length > 0 then
+        for err in wholeProjectResults.Errors do
+            printfn "F# Error: %d:%d-%d:%d %s" err.StartLineAlternate err.StartColumn err.EndLineAlternate err.EndColumn err.Message
+    else
     let file1 = wholeProjectResults.AssemblyContents.ImplementationFiles.[0]
 
     let fsDeclarations = 
@@ -353,7 +380,18 @@ let translate source =
         ]
         |> List.ofSeq
 
-    WebSharper.Compiler.Translator.DotNetToJavaScript.CompileFull comp
+    fsDeclarations |> List.iter (printfn "%s") 
+    expressions |> List.iter (WebSharper.Core.AST.Debug.PrintExpression >> printfn "compiling: %s")
+
+    try
+        WebSharper.Compiler.Translator.DotNetToJavaScript.CompileFull comp
+    with e ->
+        printfn "Compile error: %A" e
+
+    if not (List.isEmpty comp.Errors) then
+        for pos, err in comp.Errors do
+            printfn "WebSharper Error: %A %O" pos err 
+    else
 
     let currentMeta = comp.ToCurrentMetadata()
     let compiledExpressions = 
@@ -374,14 +412,35 @@ let translate source =
         ]
     errors |> List.iter (printfn "%A")
 
-    let pkg = WebSharper.Compiler.Packager.packageAssembly metadata currentMeta false
+    let pkg = WebSharper.Compiler.Packager.packageAssembly metadata currentMeta None WebSharper.Compiler.Packager.OnLoadIfExists
     
     let js, map = pkg |> WebSharper.Compiler.Packager.exprToString WebSharper.Core.JavaScript.Readable WebSharper.Core.JavaScript.Writer.CodeWriter                                       
 
-    fsDeclarations |> List.iter (printfn "%s") 
-    expressions |> List.iter (WebSharper.Core.AST.Debug.PrintExpression >> printfn "compiling: %s")
     compiledExpressions |> List.iter (WebSharper.Core.AST.Debug.PrintExpression >> printfn "compiled: %s")
     js |> printfn "%s" 
+
+translate """
+module M
+
+open WebSharper
+
+[<JavaScript>]
+module Module =
+    let AnonRecord (x: {| A : int |}) = {| B = x.A |}
+
+    type AnonRecordInUnion =
+        | AnonRecordTest of {| A: int; B: string|}
+
+    let AnonRecordInUnion() =
+        AnonRecordTest {| A = 3; B = "hi"|}   
+
+    let AnonRecordNested() =
+        {| A = 1; B = {| A = 2; B = "hi"|}|}  
+        
+    let StructAnonRecord() =
+        let a = struct {| SA = 5 |}
+        a.SA
+"""
 
 translate """
 module M

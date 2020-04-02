@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -33,8 +33,13 @@ module private MapUtil =
 
     let fromSeq(s: seq<_>) =
         let a : Pair<_,_> [] =
-            [| for (k, v) in Seq.distinctBy fst s ->
-                { Key = k; Value = v } |]
+            s
+            |> Seq.rev
+            |> Seq.distinctBy fst
+            |> Seq.map (fun (k, v) ->
+                { Key = k; Value = v }
+            )
+            |> Array.ofSeq
         Array.sortInPlace a
         T.OfSorted a
 
@@ -54,6 +59,14 @@ type internal FSharpMap<'K,'V when 'K : comparison>
 
         member this.ContainsKey k = 
             tree |> T.Contains {Key=k; Value = JS.Undefined}
+
+        member this.TryGetValue (k: 'K, r: byref<'V>) = 
+            match this.TryFind k with
+            | Some v ->
+                r <- v
+                true
+            | _ ->
+                false
 
         member this.Count = T.Count tree
 

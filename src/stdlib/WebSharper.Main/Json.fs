@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -82,6 +82,10 @@ let shallowMap (f: obj -> obj) (x: obj) : obj =
         | _ ->
             x
 
+type SpecialTypes =
+    | List = 1
+    | Decimal = 2
+
 [<JavaScript>]
 [<Require(typeof<Resource>)>]
 let Activate<'T> (json: obj) : 'T =
@@ -91,7 +95,11 @@ let Activate<'T> (json: obj) : 'T =
             json
         else
             for i = 0 to types.Length - 1 do
-                types.[i] <- lookup (As types.[i])
+                types.[i] <- 
+                    match As<string[]> types.[i] with
+                    | [| "WebSharper"; "List"; "T" |] -> box SpecialTypes.List
+                    | [| "WebSharper"; "Decimal" |] -> box SpecialTypes.Decimal
+                    | t -> lookup t
             json?("$DATA")
     let rec decode (x: obj) : obj =
         if x = null then x else
@@ -104,8 +112,10 @@ let Activate<'T> (json: obj) : 'T =
                     let ti = x?("$T")
                     if ti ===. JS.Undefined then o else
                         let t = types.[ti]
-                        if t ===. JS.Global?WebSharper?List?T then
+                        if t ===. SpecialTypes.List then
                             box (List.ofArray (As<obj[]> o))
+                        elif t ===. SpecialTypes.Decimal then
+                            box (JS.Global?WebSharper?Decimal?CreateDecimalBits(o))
                         else
                             let r = JS.New types.[ti]
                             JS.ForEach o (fun k -> (?<-) r k ((?) o k); false)

@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -28,7 +28,12 @@ open WebSharper.Core
 open WebSharper.Core.AST
 module M = WebSharper.Core.Metadata
 
-let packageAssembly (refMeta: M.Info) (current: M.Info) isBundle =
+type EntryPointStyle =
+    | OnLoadIfExists
+    | ForceOnLoad
+    | ForceImmediate
+
+let packageAssembly (refMeta: M.Info) (current: M.Info) entryPoint entryPointStyle =
     let addresses = Dictionary()
     let declarations = ResizeArray()
     let statements = ResizeArray()
@@ -37,7 +42,7 @@ let packageAssembly (refMeta: M.Info) (current: M.Info) isBundle =
     let glob = Var g
     declarations.Add <| VarDeclaration (g, Var (Id.Global()))
     addresses.Add(Address [], glob)
-    addresses.Add(Address [ "window" ], glob)
+    addresses.Add(Address [ "self" ], glob)
     let safeObject expr = Binary(expr, BinaryOperator.``||``, Object []) 
     
     let rec getAddress (address: Address) =
@@ -204,10 +209,14 @@ let packageAssembly (refMeta: M.Info) (current: M.Info) isBundle =
         classes.Remove t |> ignore
         packageClass c t.Value.FullName
 
-    if isBundle then
-        match current.EntryPoint with
-        | Some ep -> statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))
-        | _ -> failwith "Missing entry point. Add SPAEntryPoint and JavaScript attributes to a static method without arguments."
+    match entryPointStyle, entryPoint with
+    | (OnLoadIfExists | ForceOnLoad), Some ep ->
+        statements.Add <| ExprStatement (JSRuntime.OnLoad (Function([], ep)))
+    | ForceImmediate, Some ep ->
+        statements.Add ep
+    | (ForceOnLoad | ForceImmediate), None ->
+        failwith "Missing entry point or export. Add SPAEntryPoint attribute to a static method without arguments, or JavaScriptExport on types/methods to expose them."
+    | OnLoadIfExists, None -> ()
     
     let trStatements = statements |> Seq.map globalAccessTransformer.TransformStatement |> List.ofSeq
 

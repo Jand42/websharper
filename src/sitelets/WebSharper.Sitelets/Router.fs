@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2014 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -20,13 +20,60 @@
 
 namespace WebSharper.Sitelets
 
+open System.Collections.Generic
+open System.Runtime.CompilerServices
+open System.Runtime.InteropServices
+open System.Text
 open WebSharper
 open WebSharper.JavaScript
 open WebSharper.JQuery
-open System.Collections.Generic
-open System.Text
 
 #nowarn "64" // type parameter renaming warnings 
+
+/// Indicates the "Access-Control-Xyz" headers to send.
+type CorsAllows =
+    {
+        Origins : string list
+        Methods : string list
+        Headers : string list
+        ExposeHeaders : string list
+        MaxAge : int option
+        Credentials : bool
+    }
+
+    [<Inline>]
+    static member Empty =
+        {
+            Origins = []
+            Methods = []
+            Headers = []
+            ExposeHeaders = []
+            MaxAge = None
+            Credentials = false
+        }
+
+/// Use as an endpoint to indicate that it must check for Cross-Origin Resource Sharing headers.
+/// In addition to matching the same endpoints as 'EndPoint does, this also matches preflight OPTIONS requests.
+/// The corresponding Content should use Content.Cors.
+type Cors<'EndPoint> =
+    {
+        [<OptionalField>]
+        DefaultAllows : CorsAllows option
+        // if None, then this is a preflight OPTIONS request
+        [<OptionalField>]
+        EndPoint : 'EndPoint option
+    }
+
+module Cors =
+    [<Inline>]
+    let Of (endpoint: 'EndPoint) =
+        { DefaultAllows = None; EndPoint = Some endpoint }
+
+    [<Inline>]
+    let (|Of|Preflight|) (c: Cors<'EndPoint>) =
+        match c.EndPoint with
+        | Some ep -> Of ep
+        | None -> Preflight
 
 [<NamedUnionCases "result"; RequireQualifiedAccess>]
 type ParseRequestResult<'T> =
@@ -300,10 +347,7 @@ type Route =
         let segments = System.Collections.Generic.Queue()
         let mutable queryArgs = Map.empty
         let mutable formData = Map.empty
-        let mutable i = 0
-        let l = paths.Length
-        while i < l do
-            let p = paths.[i]
+        paths |> Array.iter (fun p ->
             match p.Method with
             | Some _ as m ->
                 method <- m
@@ -315,7 +359,7 @@ type Route =
             queryArgs <- p.QueryArgs |> Map.foldBack Map.add queryArgs 
             formData <- p.FormData |> Map.foldBack Map.add formData 
             p.Segments |> List.iter segments.Enqueue
-            i <- i + 1
+        )
         {
             Segments = List.ofSeq segments
             QueryArgs = queryArgs
@@ -532,20 +576,28 @@ module Router =
             member this.Link e = link e
         }
 
-    /// Compatible with old UI.Next.RouteMap.Create.
-    let Create (ser: 'T -> list<string>) (des: list<string> -> 'T) =
+    /// Creates a router for parsing/writing a full route using URL segments.
+    let Create (ser: 'T -> list<string>) (des: list<string> -> option<'T>) =
         {
             Parse = fun path ->
-                Seq.singleton ({ path with Segments = [] }, des path.Segments)
+                match des path.Segments with
+                | Some ep ->
+                    Seq.singleton ({ path with Segments = [] }, ep)
+                | None ->
+                    Seq.empty
             Write = fun value ->
                 Some (Seq.singleton (Route.Segment(ser value)))
-        }
+        } : Router<'T>
 
-    /// Compatible with old UI.Next.RouteMap.CreateWithQuery.
-    let CreateWithQuery (ser: 'T -> list<string> * Map<string, string>) (des: list<string> * Map<string, string> -> 'T) =
+    /// Creates a router for parsing/writing a full route using URL segments and query parameters.
+    let CreateWithQuery (ser: 'T -> list<string> * Map<string, string>) (des: list<string> * Map<string, string> -> option<'T>) =
         {
             Parse = fun path ->
-                Seq.singleton ({ path with Segments = [];  }, des (path.Segments, path.QueryArgs))
+                match des (path.Segments, path.QueryArgs) with
+                | Some ep ->
+                    Seq.singleton ({ path with Segments = [] }, ep)
+                | None ->
+                    Seq.empty
             Write = fun value ->
                 let s, q = ser value
                 Some (Seq.singleton { Route.Empty with Segments = s; QueryArgs = q })
@@ -670,13 +722,16 @@ module Router =
         | Some p -> p.ToLink()
         | None -> ""
 
-    let Ajax (router: Router<'A>) endpoint =
+    let AjaxWith (settings: AjaxSettings) (router: Router<'A>) endpoint =
+        let settings = if As settings then settings else AjaxSettings()
         match Write router endpoint with
         | Some path ->
-            let settings = AjaxSettings(DataType = DataType.Text)
-            match path.Method with
-            | Some m -> settings.Type <- As m
-            | _ -> ()
+            if settings.DataType ===. JS.Undefined then
+                settings.DataType <- DataType.Text
+            settings.Type <-
+                match path.Method with
+                | Some m -> As m
+                | None -> RequestType.POST
             match path.Body.Value with
             | null ->
                 if not (Map.isEmpty path.FormData) then
@@ -685,21 +740,52 @@ module Router =
                     settings.ContentType <- Union1Of2 false
                     settings.Data <- fd
                     settings.ProcessData <- false
-                if Option.isNone path.Method then settings.Type <- RequestType.POST 
             | b ->
                 settings.ContentType <- Union2Of2 "application/json"
                 settings.Data <- b
                 settings.ProcessData <- false
-                if Option.isNone path.Method then settings.Type <- RequestType.POST 
             Async.FromContinuations (fun (ok, err, cc) ->
                 settings.Success <- fun res _ _ -> ok (As<string> res) 
                 settings.Error <- fun _ _ msg -> err (exn msg)
                 // todo: cancellation
                 let url = path.ToLink()
-                JQuery.Ajax(url, settings) |> ignore
+                settings.Url <-
+                    if As settings.Url then
+                        settings.Url.TrimEnd('/') + url
+                    else
+                        url
+                JQuery.Ajax(settings) |> ignore
             )
         | _ -> 
             failwith "Failed to map endpoint to request" 
+
+    let Ajax router endpoint =
+        AjaxWith (AjaxSettings()) router endpoint
+
+    let FetchWith (baseUrl: option<string>) (options: RequestOptions) (router: Router<'A>) endpoint : Promise<Response> =
+        let options = if As options then options else RequestOptions()
+        match Write router endpoint with
+        | Some path ->
+            options.Method <-defaultArg path.Method "POST"
+            match path.Body.Value with
+            | null ->
+                if not (Map.isEmpty path.FormData) then
+                    let fd = JavaScript.FormData()
+                    path.FormData |> Map.iter (fun k v -> fd.Append(k, v))
+                    options.Body <- fd
+            | b ->
+                options.Body <- b
+            let url = path.ToLink()
+            let url =
+                match baseUrl with
+                | Some baseUrl -> baseUrl.TrimEnd('/') + url
+                | None -> url
+            JS.Fetch(url, options)
+        | _ -> 
+            failwith "Failed to map endpoint to request" 
+
+    let Fetch router endpoint =
+        FetchWith None (RequestOptions()) router endpoint
 
     let HashLink (router: Router<'A>)  endpoint =
         "#" + Link router endpoint
@@ -999,8 +1085,12 @@ type Router<'T when 'T: equality> with
         Router.FormData this
 
     [<Inline>]
-    member this.Ajax(endpoint) =
-        Router.Ajax this endpoint |> Async.StartAsTask
+    member this.Ajax(endpoint, [<Optional>] settings) =
+        Router.AjaxWith settings this endpoint |> Async.StartAsTask
+
+    [<Inline>]
+    member this.Fetch(endpoint, [<Optional>] baseUrl, [<Optional>] settings) =
+        Router.FetchWith (Option.ofObj baseUrl) settings this endpoint
 
     [<Inline>]
     member this.Box() =
@@ -1010,8 +1100,6 @@ type Router<'T when 'T: equality> with
     member this.Array() =
         Router.Array this
 
-open System.Runtime.CompilerServices
-    
 [<Extension>]
 type RouterExtensions =
     [<Inline>]
@@ -1112,6 +1200,8 @@ module IRouter =
 
 [<JavaScript>]
 module RouterOperators =
+    open System.Globalization
+    
     let rRoot : Router =
         {
             Parse = fun path -> Seq.singleton path
@@ -1132,7 +1222,8 @@ module RouterOperators =
                     | Some s ->
                         Seq.singleton ({ path with Segments = t }, s)
                     | _ -> Seq.empty
-                | _ -> Seq.empty
+                | [] ->
+                    Seq.singleton (path, "")
             Write = fun value ->
                 Some (Seq.singleton (Route.Segment (if isNull value then "null" else StringEncoding.write value)))
         }
@@ -1168,12 +1259,30 @@ module RouterOperators =
                 Some (Seq.singleton (Route.Segment (string value)))
         }
 
+    [<JavaScript false>]
+    let inline rTryParseFloat< ^T when ^T: (static member TryParse: string * NumberStyles * NumberFormatInfo * byref< ^T> -> bool) and ^T: equality>() =
+        {
+            Parse = fun path ->
+                match path.Segments with
+                | h :: t -> 
+                    let mutable res = Unchecked.defaultof< ^T>
+                    let ok =
+                        (^T: (static member TryParse: string * NumberStyles * NumberFormatInfo * byref< ^T> -> bool)
+                            (h, NumberStyles.Float, NumberFormatInfo.InvariantInfo, &res))
+                    if ok then 
+                        Seq.singleton ({ path with Segments = t }, res)
+                    else Seq.empty
+                | _ -> Seq.empty
+            Write = fun value ->
+                Some (Seq.singleton (Route.Segment (string value)))
+        }
+
     /// Parse/write a Guid.
     let rGuid = rTryParse<System.Guid>()
     /// Parse/write an int.
     let rInt = rTryParse<int>()
     /// Parse/write a double.
-    let rDouble = rTryParse<double>()
+    let rDouble = if IsClient then rTryParse<double>() else rTryParseFloat<double>()
     /// Parse/write a signed byte.
     let rSByte = rTryParse<sbyte>() 
     /// Parse/write a byte.
@@ -1189,7 +1298,7 @@ module RouterOperators =
     /// Parse/write a 64-bit unsigned int.
     let rUInt64 = rTryParse<uint64>() 
     /// Parse/write a single.
-    let rSingle = rTryParse<single>() 
+    let rSingle = if IsClient then rTryParse<single>() else rTryParseFloat<single>()
 
     /// Parse/write a bool.
     let rBool : Router<bool> =
@@ -1282,6 +1391,16 @@ module RouterOperators =
                     pad4 d.Year + "-" + pad2 d.Month + "-" + pad2 d.Day
                     + "-" + pad2 d.Hour + "." + pad2 d.Minute + "." + pad2 d.Second
                 Some (Seq.singleton (Route.Segment s))
+        }
+
+    let rCors<'T when 'T : equality> (r: Router<'T>) : Router<Cors<'T>> =
+        {
+            Parse = fun path ->
+                r.Parse path
+                |> Seq.map (fun (p, e) -> (p, Cors.Of e))
+            Write = function
+                | Cors.Of e -> r.Write e
+                | Cors.Preflight -> Some (Seq.singleton Route.Empty)
         }
       
     let internal Tuple (readItems: obj -> obj[]) (createTuple: obj[] -> obj) (items: Router<obj>[]) =

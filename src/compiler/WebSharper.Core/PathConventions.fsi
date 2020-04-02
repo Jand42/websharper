@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -97,6 +97,12 @@ module PathConventions =
 
         /// Filename for the `.d.ts` TypeScript file corresponding to an assembly.
         member TypeScriptDefinitionsFileName : AssemblyId -> string
+
+        /// Base path for content URLs.
+        member ContentBasePath : string
+
+        /// Base path for script URLs.
+        member ScriptBasePath : string
 
         /// Constructs a utiltiy object based on the physical path to the
         /// web root folder, which can be obtained by `Server.MapPath("~")`.

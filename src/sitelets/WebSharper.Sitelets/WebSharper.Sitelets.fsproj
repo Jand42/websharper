@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\msbuild\netfx.props" />
   <PropertyGroup>
     <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
     <WebSharperProject>Library</WebSharperProject>
+    <WebSharperUseNetFxCompiler>True</WebSharperUseNetFxCompiler>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
@@ -37,6 +39,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\compiler\WebSharper.Core.JavaScript\WebSharper.Core.JavaScript.fsproj" />
     <ProjectReference Include="..\..\compiler\WebSharper.Core\WebSharper.Core.fsproj" />
+    <ProjectReference Include="..\..\stdlib\WebSharper.JQuery\WebSharper.JQuery.fsproj" />
     <ProjectReference Include="..\..\stdlib\WebSharper.Main\WebSharper.Main.fsproj" />
     <ProjectReference Include="..\WebSharper.Web\WebSharper.Web.fsproj" />
   </ItemGroup>

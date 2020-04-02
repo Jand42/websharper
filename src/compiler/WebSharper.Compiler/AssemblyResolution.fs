@@ -1,4 +1,8 @@
-﻿// Copyright 2013-2015 IntelliFactory
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -11,6 +15,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied.  See the License for the specific language governing
 // permissions and limitations under the License.
+//
+// $end{copyright}
 
 namespace WebSharper.Compiler
 
@@ -33,12 +39,8 @@ module Implemetnation =
             |> isCompatible name)
 
     let loadInto (baseDir: string) (dom: AppDomain) (path: string) =
-        let f = FileInfo path
-        if f.DirectoryName = baseDir then
-            dom.Load(AssemblyName.GetAssemblyName path)
-        else
-            File.ReadAllBytes path
-            |> dom.Load
+        File.ReadAllBytes path
+        |> dom.Load
 
     type AssemblyResolution =
         {
@@ -82,7 +84,7 @@ module Implemetnation =
                 seq {
                     for path in paths do
                         for ext in [".dll"; ".exe"] do
-                            if Path.GetFileName(path).ToLower() = (name.Name + ext).ToLower() then
+                            if String.Equals(Path.GetFileName(path), name.Name + ext, StringComparison.OrdinalIgnoreCase) then
                                 if isMatchingFile name path then
                                     yield path
                 }

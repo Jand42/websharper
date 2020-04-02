@@ -28,10 +28,11 @@ let private addOne (c: IControlBody) =
     c.ReplaceInDom(e)
 
 [<SPAEntryPoint>]
+[<Require(typeof<WebSharper.Tests.TwitterBootstrap>)>]
 let Main() =
     WebSharper.CSharp.Tests.Remoting.ShouldRun <- false
     Seq.iter addOne [
-        WebSharper.Tests.Main.RunTests()
+        WebSharper.Tests.Main.RunTests false true
         WebSharper.Collections.Tests.Main.RunTests()
         WebSharper.CSharp.Tests.Tests.RunTests()
         WebSharper.Html5.Tests.Main.RunTests()
@@ -39,4 +40,7 @@ let Main() =
     ]
 
 [<assembly: JavaScript>]
+[<assembly: JavaScriptExport("File1.fs")>]
+[<assembly: JavaScriptExport("WebSharper.SPA.Tests.JavaScriptExportTest2+IncludedFromAssemblyLevel1")>]
+[<assembly: JavaScriptExport(typeof<JavaScriptExportTest2.IncludedFromAssemblyLevel2>)>]
 do ()

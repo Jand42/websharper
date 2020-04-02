@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -148,6 +148,11 @@ module UnpackCommand =
             assemblies wsRuntimePath None
             cmd.RootDirectory cmd.DownloadResources cmd.UnpackSourceMap U.ExpressionOptions.DiscardExpressions 
         |> ignore
+
+        if errors.Count = 0 then
+            C.Ok
+        else
+            C.Errors (List.ofSeq errors)
 
         C.Ok
         

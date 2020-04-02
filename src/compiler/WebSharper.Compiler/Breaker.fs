@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -539,7 +539,7 @@ let rec breakExpr expr : Broken<BreakResult> =
                 Variables = brA.Variables |> List.filter (fun (v, _) -> removeVars |> List.contains v |> not)
             }
     | NewArray [ a ] ->
-        br a |> mapBroken (fun a -> NewArray [getExpr a])
+        br a |> toBrExpr |> mapBroken (fun a -> NewArray [ a ])
     | NewArray a ->
         brL a |> mapBroken NewArray
     | Conditional (I.Sequential a, b, c) ->

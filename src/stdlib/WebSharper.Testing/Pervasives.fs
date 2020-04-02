@@ -32,7 +32,7 @@ module internal Internal =
 
     open WebSharper.Testing.RandomValues.Internal
 
-    let asserter = ty "WebSharper.Testing.Pervasives+QUnit+Asserter"
+    let asserter = ty "WebSharper.QUnit+Asserter"
     let runnerOf t = !@asserter ^-> Definitions.FSharpChoice 2 @@[t; Definitions.FSharpAsync @@[t]]
 
     type TestPropertyMacro() =
@@ -88,94 +88,6 @@ module internal Internal =
                 Call(None, pervasives, m c.Method.Generics, [name; mkGenerator c.Method.Generics.Head; f])
                 |> MacroOk
             | _ -> MacroFallback
-
-module QUnit =
-
-    [<Stub>]
-    type Asserter =
-
-        [<Stub; Name "ok">]
-        member this.Ok(value: bool) = X<unit>
-
-        [<Stub; Name "ok">]
-        member this.Ok(value: bool, message: string) = X<unit>
-
-        [<Stub; Name "notOk">]
-        member this.NotOk(value: bool) = X<unit>
-
-        [<Stub; Name "notOk">]
-        member this.NotOk(value: bool, message: string) = X<unit>
-
-        [<Stub; Name "equal">]
-        member this.Equal<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "equal">]
-        member this.Equal<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "notEqual">]
-        member this.NotEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "notEqual">]
-        member this.NotEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "deepEqual">]
-        member this.DeepEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "deepEqual">]
-        member this.DeepEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "notDeepEqual">]
-        member this.NotDeepEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "notDeepEqual">]
-        member this.NotDeepEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "strictEqual">]
-        member this.StrictEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "strictEqual">]
-        member this.StrictEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "notStrictEqual">]
-        member this.NotStrictEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "notStrictEqual">]
-        member this.NotStrictEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "propEqual">]
-        member this.PropEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "propEqual">]
-        member this.PropEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "notPropEqual">]
-        member this.NotPropEqual<'T>(actual: 'T, expected: 'T) = X<unit>
-
-        [<Stub; Name "notPropEqual">]
-        member this.NotPropEqual<'T>(actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "expect">]
-        member this.Expect(assertionCount: int) = X<unit>
-
-        [<Stub; Name "async">]
-        member this.Async() = X<unit -> unit>
-
-        [<Stub; Name "push">]
-        member this.Push(result: bool, actual: 'T, expected: 'T, message: string) = X<unit>
-
-        [<Stub; Name "push">]
-        member this.Push(result: bool, actual: 'T, expected: 'T) = X<unit>
-
-    // Unlike the methods above, Test and Module must not be implemented as X<_>.
-    // They are meant to be called from the top-level, which means they will be called
-    // from the server side too. Since X<_>'s .NET implementation throws an exception,
-    // it is not suitable in this case.
-
-    [<Inline "QUnit.test($name, $callback)">]
-    let Test (name: string) (callback: Asserter -> unit) = ()
-
-    [<Inline "QUnit.module($name)">]
-    let Module (name: string) = ()
 
 type TestCategory = internal { name : string; run : (unit -> unit) }
 
@@ -937,7 +849,7 @@ type SubtestBuilder () =
             [<ProjectionParameter>] value: 'A -> bool
         ) : Runner<'A> =
         r |> Runner.AddTest (fun asserter args ->
-            asserter.Ok(value args)
+            asserter.StrictEqual(value args, true)
         )
 
     /// Checks that a boolean is true.
@@ -949,7 +861,7 @@ type SubtestBuilder () =
             message: string
         ) : Runner<'A> =
         r |> Runner.AddTest (fun asserter args ->
-            asserter.Ok(value args, message)
+            asserter.StrictEqual(value args, true, message)
         )
 
     /// Checks that a boolean is true.
@@ -961,7 +873,7 @@ type SubtestBuilder () =
         ) : Runner<'A> =
         r |> Runner.AddTestAsync (fun asserter args -> async {
             let! value = value args 
-            return asserter.Ok(value)
+            return asserter.StrictEqual(value, true)
         })
 
     /// Checks that a boolean is true.
@@ -974,7 +886,7 @@ type SubtestBuilder () =
         ) : Runner<'A> =
         r |> Runner.AddTestAsync (fun asserter args -> async {
             let! value = value args 
-            return asserter.Ok(value, message)
+            return asserter.StrictEqual(value, true, message)
         })
 
     /// Checks that a boolean is false.
@@ -985,7 +897,7 @@ type SubtestBuilder () =
             [<ProjectionParameter>] value: 'A -> bool
         ) : Runner<'A> =
         r |> Runner.AddTest (fun asserter args ->
-            asserter.NotOk(value args)
+            asserter.StrictEqual(value args, false)
         )
 
     /// Checks that a boolean is false.
@@ -997,7 +909,7 @@ type SubtestBuilder () =
             message: string
         ) : Runner<'A> =
         r |> Runner.AddTest (fun asserter args ->
-            asserter.NotOk(value args, message)
+            asserter.StrictEqual(value args, false, message)
         )
 
     /// Checks that a boolean is false.
@@ -1009,7 +921,7 @@ type SubtestBuilder () =
         ) : Runner<'A> =
         r |> Runner.AddTestAsync (fun asserter args -> async {
             let! value = value args 
-            return asserter.NotOk(value)
+            return asserter.StrictEqual(value, false)
         })
 
     /// Checks that a boolean is false.
@@ -1022,7 +934,7 @@ type SubtestBuilder () =
         ) : Runner<'A> =
         r |> Runner.AddTestAsync (fun asserter args -> async {
             let! value = value args 
-            return asserter.NotOk(value, message)
+            return asserter.StrictEqual(value, false, message)
         })
 
     /// Runs a test for each element in a sequence.
@@ -1190,6 +1102,10 @@ type SubtestBuilder () =
                 | Choice2Of2 b -> return! b
             })
 
+    [<Inline>]
+    member this.Bind(a: Promise<'A>, f: 'A -> Runner<'B>) : Runner<'B> =
+        this.Bind(Promise.AsAsync a, f)
+
     member this.Yield(x) = fun asserter -> Choice1Of2 x
 
     member this.Return(x) = fun asserter -> Choice1Of2 x
@@ -1214,11 +1130,11 @@ type SubtestBuilder () =
                 })
 
 [<JavaScript>]
-type TestBuilder (name: string) =
+type TestBuilder (run: (QUnit.Asserter -> unit) -> unit) =
     inherit SubtestBuilder ()
 
     member this.Run(e) =
-        QUnit.Test name (fun asserter ->
+        run (fun asserter ->
             try
                 match e asserter with
                 | Choice1Of2 _ -> ()
@@ -1240,7 +1156,22 @@ type TestBuilder (name: string) =
         )
 
 [<JavaScript>]
-let Test name = new TestBuilder(name)
+let Test name = new TestBuilder(QUnit.Test name)
+
+[<JavaScript>]
+let TestIf bool name = new TestBuilder(if bool then QUnit.Test name else ignore)
+
+[<JavaScript>]
+let Skip name = new TestBuilder(QUnit.Skip name)
+
+[<JavaScript>]
+let SkipIf bool name = new TestBuilder(if bool then QUnit.Skip name else ignore)
+
+[<JavaScript>]
+let Todo name = new TestBuilder(QUnit.Todo name)
+
+[<JavaScript>]
+let TodoIf bool name = new TestBuilder(if bool then QUnit.Todo name else ignore)
 
 [<JavaScript>]
 let Do = new SubtestBuilder()

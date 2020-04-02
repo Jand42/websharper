@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -46,27 +46,6 @@ let Global =
             Generic - fun t -> "warn" => t ^-> T<unit>
             Generic - fun t -> "warn" => t *+ T<obj> ^-> T<unit>
         ]
-
-        Class "JS"
-        |+> Static [
-                "window" =? Html5.General.Window |> WithGetterInline "window"
-                "document" =? Dom.Interfaces.Document |> WithGetterInline "document"
-                "NaN" =? T<double> |> WithGetterInline "NaN"
-                "Infinity" =? T<double> |> WithGetterInline "Infinity"
-                "undefined" =? T<obj> |> WithGetterInline "undefined"
-                "eval" => T<string->obj> |> WithInline "eval($0)"
-                "parseInt" => T<string> * !?T<int>?radix ^-> T<int> |> WithInline "parseInt($0, $1)"
-                "parseFloat" => T<string->double> |> WithInline "parseFloat($0)"
-                "isNaN" => T<obj> ^-> T<bool> |> WithInline "isNaN($0)"
-                "isFinite" => (T<int> + T<float>) ^-> T<bool> |> WithInline "isFinite($0)"
-                "decodeURI" => T<string->string> |> WithInline "decodeURI($0)"
-                "decodeURIComponent" => T<string->string> |> WithInline "decodeURIComponent($0)"
-                "encodeURI" => T<string->string> |> WithInline "encodeURI($0)"
-                "encodeURIComponent" => T<string->string> |> WithInline "encodeURIComponent($0)"
-                Generic - fun t -> "Inline" => T<string>?inlineString *+ T<obj> ^-> t
-                |> WithMacro typeof<WebSharper.Core.Macros.InlineJS>
-                |> WithComment "Parses and inlines JavaScript code"
-            ]
     ]
 
 let Assembly =
@@ -74,7 +53,6 @@ let Assembly =
         yield! Ecma.Definition.Namespaces
         yield! Dom.Definition.Namespaces
         yield! Html5.Definition.Namespaces
-        yield! Xhr.Definition.Namespaces
         yield! Cookies.Definition.Namespaces
         yield Global
     ]

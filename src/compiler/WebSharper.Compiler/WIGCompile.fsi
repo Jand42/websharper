@@ -2,7 +2,7 @@
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -42,7 +42,7 @@ type CompilerOptions =
         OutputPath : option<string>
         ProjectDir : string
         ReferencePaths : seq<string>
-        StrongNameKeyPair : option<StrongNameKeyPair>
+        StrongNameKeyPath : option<string>
     }
 
     static member Default : assemblyName: string -> CompilerOptions

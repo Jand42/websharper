@@ -151,6 +151,12 @@ module Content =
     /// Constructs a 200 Ok response with empty body.
     val Ok<'T> : Async<Content<'T>>
 
+    /// Respond to a Cross-Origin checked request.
+    val Cors : Cors<'EndPoint>
+            -> (CorsAllows -> CorsAllows)
+            -> ('EndPoint -> Async<Content<'OuterEndPoint>>)
+            -> Async<Content<'OuterEndPoint>>
+
     type RenderedResources =
         {
             Scripts : string
@@ -185,6 +191,8 @@ type CSharpContent =
     val private c: Content<obj>
 
     member AsContent : Content<obj>
+
+    static member FromContent : Content<obj> -> CSharpContent
 
     /// Creates a JSON content from the given object.
     static member Json<'U>

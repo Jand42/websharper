@@ -1,4 +1,23 @@
-﻿using System;
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you
+// may not use this file except in compliance with the License.  You may
+// obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.  See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// $end{copyright}
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -11,7 +30,7 @@ using static WebSharper.JavaScript.Pervasives;
 
 namespace WebSharper.CSharp.Tests
 {
-    [JavaScript, Serializable]
+    [JavaScript]
     public struct TestStruct
     {
         public int X;
@@ -24,11 +43,16 @@ namespace WebSharper.CSharp.Tests
         }
     }
 
-    [JavaScript, Serializable]
+    [JavaScript]
     public class TestClass
     {
         public int X = 0;
         public int Y { get; set; }
+    }
+
+    [JavaScript]
+    public class TestClassSub : TestClass
+    {
     }
 
     public static class Server
@@ -40,9 +64,22 @@ namespace WebSharper.CSharp.Tests
         }
 
         [Remote]
+        public static Task<int> FailOnServer()
+        {
+            return Task.FromException<int>(new Exception("Deliberately failing for testing."));
+        }
+
+        [Remote]
         public static Task<int> AddOneAsync(int x)
         {
             return Task.FromResult(x + 1);
+        }
+
+        [Remote]
+        public static Task<(int, int)> AddOnesAsync((int, int) t)
+        {
+            var (x, y) = t;
+            return Task.FromResult((x + 1, y + 1));
         }
 
         private static Dictionary<int, int> values = new Dictionary<int, int>();
@@ -96,6 +133,14 @@ namespace WebSharper.CSharp.Tests
 
         [Remote]
         public static Task<TestClass> IncrementXY(TestClass o)
+        {
+            o.X++;
+            o.Y++;
+            return Task.FromResult(o);
+        }
+
+        [Remote]
+        public static Task<TestClassSub> IncrementXYSub(TestClassSub o)
         {
             o.X++;
             o.Y++;
@@ -169,6 +214,14 @@ namespace WebSharper.CSharp.Tests
         }
 
         [Test]
+        public async Task WithValueTuple()
+        {
+            if (!ShouldRun) { Expect(0); return; }
+            var r = await Server.AddOnesAsync((1783, 456));
+            Equal(r, (1784, 457));
+        }
+
+        [Test]
         public void SimpleVoid()
         {
             if (!ShouldRun) { Expect(0); return; }
@@ -231,6 +284,18 @@ namespace WebSharper.CSharp.Tests
         }
 
         [Test]
+        public async Task CustomSubClass()
+        {
+            if (!ShouldRun) { Expect(0); return; }
+            var o = new TestClassSub();
+            o.X = 1;
+            o.Y = 1;
+            o = await Server.IncrementXYSub(o);
+            Equal(o.X, 2);
+            Equal(o.Y, 2);
+        }
+
+        [Test]
         public async Task CustomStruct()
         {
             if (!ShouldRun) { Expect(0); return; }
@@ -263,6 +328,50 @@ namespace WebSharper.CSharp.Tests
                     (!WebSharper.Pervasives.IsClient ? Server.Zero() : 1)
                     : Server.Zero();
             Equal(ok, 1, "IsClient in conditional expression");
+        }
+
+        static public async Task<int> AddOneAsyncSafe(int x)
+        {
+            try
+            {
+                return await Server.AddOneAsync(x);
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Unexpected server error");
+                throw;
+            }
+        }
+
+        static public async Task<int> TestServerFailure()
+        {
+            try
+            {
+                return await Server.FailOnServer();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Successfully caught exception in C# async");
+                throw;
+            }
+        }
+
+        [Test]
+        public async Task AsyncTryCatch()
+        {
+            if (!ShouldRun) { Expect(0); return; }
+            var r = await AddOneAsyncSafe(1783);
+            Equal(r, 1784);
+            r = 0;
+            try
+            {
+                await TestServerFailure();
+            }
+            catch (Exception)
+            {
+                r = 1;
+            }
+            Equal(r, 1);
         }
     }
 }

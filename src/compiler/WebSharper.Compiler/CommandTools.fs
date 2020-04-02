@@ -1,8 +1,8 @@
-﻿// $begin{copyright}
+// $begin{copyright}
 //
 // This file is part of WebSharper
 //
-// Copyright (c) 2008-2016 IntelliFactory
+// Copyright (c) 2008-2018 IntelliFactory
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you
 // may not use this file except in compliance with the License.  You may
@@ -37,6 +37,7 @@ type ProjectType =
     | Website
     | Html
     | WIG
+    | Proxy
 
     static member Parse(wsProjectType: string) =
         match wsProjectType.ToLower() with
@@ -46,13 +47,14 @@ type ProjectType =
         | "extension" | "interfacegenerator" -> Some WIG
         | "html" -> Some Html
         | "site" | "web" | "website" | "export" -> Some Website
+        | "proxy" -> Some Proxy
         | _ -> argError ("Invalid project type: " + wsProjectType)
 
 type JavaScriptScope =
     | JSDefault
     | JSAssembly
     | JSFilesOrTypes of string[]
-
+ 
 type WsConfig =
     {
         SourceMap   : bool
@@ -60,6 +62,7 @@ type WsConfig =
         IsDebug : bool
         ProjectType : ProjectType option
         OutputDir  : string option
+        ScriptBaseUrl : string option
         AssemblyFile : string
         References  : string[] 
         Resources : (string * string option)[]
@@ -71,11 +74,15 @@ type WsConfig =
         PrintJS : bool
         WarnOnly : bool
         DeadCodeElimination : bool
-        DownloadResources : bool
+        DownloadResources : bool option
         AnalyzeClosures : bool option
         JavaScriptScope : JavaScriptScope
+        JavaScriptExport : JsExport[]
         JSOutputPath : string option
         MinJSOutputPath : string option
+        SingleNoJSErrors : bool
+        ProxyTargetName : string option
+        UseJavaScriptSymbol : bool
     }
 
     member this.ProjectDir =
@@ -85,27 +92,32 @@ type WsConfig =
 
     static member Empty =
         {                 
-             SourceMap   = false
-             TypeScript  = false
-             IsDebug = false
-             ProjectType = None
-             OutputDir  = None
-             AssemblyFile = null
-             References  = [||]
-             Resources = [||]
-             KeyFile = None
-             CompilerArgs = [||]
-             ProjectFile = null
-             Documentation = None
-             VSStyleErrors = false
-             PrintJS  = false
-             WarnOnly = false
-             DeadCodeElimination = true
-             DownloadResources = false       
-             AnalyzeClosures = None
-             JavaScriptScope = JSDefault
-             JSOutputPath = None
-             MinJSOutputPath = None
+            SourceMap   = false
+            TypeScript  = false
+            IsDebug = false
+            ProjectType = None
+            OutputDir  = None
+            ScriptBaseUrl = None
+            AssemblyFile = null
+            References  = [||]
+            Resources = [||]
+            KeyFile = None
+            CompilerArgs = [||]
+            ProjectFile = null
+            Documentation = None
+            VSStyleErrors = false
+            PrintJS  = false
+            WarnOnly = false
+            DeadCodeElimination = true
+            DownloadResources = None       
+            AnalyzeClosures = None
+            JavaScriptScope = JSDefault
+            JavaScriptExport = [||]
+            JSOutputPath = None
+            MinJSOutputPath = None
+            SingleNoJSErrors = false
+            ProxyTargetName = None
+            UseJavaScriptSymbol = false
         }
 
     static member ParseAnalyzeClosures(c: string) =
@@ -114,18 +126,18 @@ type WsConfig =
         | "movetotop" -> Some true
         | _ -> argError "Invalid value for AnalyzeClosures, value must be true or movetotop."
     
-    member this.AddJson(jsonString) =
+    member this.AddJson(jsonString, fileName) =
         let json =
             try Json.Parse jsonString 
-            with _ -> argError "Failed to parse wsconfig.json, not a valid json."
+            with _ -> argError (sprintf "Failed to parse %s, not a valid json." fileName)
         let settings = 
             match json with
             | Json.Object values -> values
-            | _ -> argError "Failed to parse wsconfig.json, not a json object."
+            | _ -> argError (sprintf "Failed to parse %s, not a json object." fileName)
         let getString k v =
             match v with
             | Json.String s -> s
-            | _ -> argError (sprintf "Invalid value in wsconfig.json for %s, expecting a string." k)
+            | _ -> argError (sprintf "Invalid value in %s for %s, expecting a string." fileName k)
         let projectDir = Path.GetDirectoryName this.ProjectFile
         let getPath k v =
             Path.Combine(projectDir, getString k v)
@@ -136,8 +148,20 @@ type WsConfig =
             | Json.String s ->
                 match bool.TryParse s with
                 | true, b -> b
-                | _ -> argError (sprintf "Invalid value in wsconfig.json for %s, expecting true or false." k)
-            | _ -> argError (sprintf "Invalid value in wsconfig.json for %s, expecting true or false." k)
+                | _ -> argError (sprintf "Invalid value in %s for %s, expecting true or false." fileName k)
+            | _ -> argError (sprintf "Invalid value in %s for %s, expecting true or false." fileName k)
+        let getDlRes k v = 
+            match v with
+            | Json.True -> Some true
+            | Json.False -> None
+            | Json.String s ->
+                match bool.TryParse s with
+                | true, b -> if b then Some true else None
+                | _ ->
+                    match s.ToLower() with
+                    | "warnonly" -> Some false
+                    | _ -> argError (sprintf "Invalid value in %s for %s, expecting true or false or 'warnonly'." fileName k)   
+            | _ -> argError (sprintf "Invalid value in %s for %s, expecting true or false or 'warnonly'." fileName k)
         let mutable res = this
         for k, v in settings do
             match k.ToLower() with
@@ -145,6 +169,8 @@ type WsConfig =
                 res <- { res with ProjectType = ProjectType.Parse (getString k v) }
             | "outputdir" ->
                 res <- { res with OutputDir = Some (getPath k v) }
+            | "scriptbaseurl" ->
+                res <- { res with ScriptBaseUrl = Some (getString k v) }
             | "dce" ->
                 res <- { res with DeadCodeElimination = getBool k v }
             | "sourcemap" ->
@@ -152,14 +178,14 @@ type WsConfig =
             | "warnonly" ->
                 res <- { res with WarnOnly = getBool k v }
             | "downloadresources" ->
-                res <- { res with DownloadResources = getBool k v }
+                res <- { res with DownloadResources = getDlRes k v }
             | "analyzeclosures" ->
                 let a =
                     match v with
                     | Json.True -> Some false
                     | Json.False -> None
                     | Json.String s -> WsConfig.ParseAnalyzeClosures s
-                    | _ -> argError "Invalid value for AnalyzeClosures, value must be true, false or \"movetotop\"."    
+                    | _ -> argError (sprintf "Invalid value in %s for AnalyzeClosures, value must be true, false or \"movetotop\"." fileName)    
                 res <- { res with AnalyzeClosures = a }
             | "javascript" ->
                 let j =
@@ -170,19 +196,37 @@ type WsConfig =
                         a |> Seq.map (
                             function
                             | Json.String s -> s
-                            | _ -> argError "Invalid value in wsconfig.json for JavaScript, expecting true or false or an array of strings."
+                            | _ -> argError (sprintf "Invalid value in %s for JavaScript, expecting true or false or an array of strings." fileName)
                         ) |> Array.ofSeq |> JSFilesOrTypes
-                    | _ -> argError "Invalid value in wsconfig.json for JavaScript, expecting true or false or an array of strings." 
+                    | _ -> argError (sprintf "Invalid value in %s for JavaScript, expecting true or false or an array of strings." fileName) 
                 res <- { res with JavaScriptScope = j }
+            | "javascriptexport" ->
+                let j =
+                    match v with
+                    | Json.True -> [| ExportCurrentAssembly |]
+                    | Json.False -> [||]
+                    | Json.Array a ->
+                        a |> Seq.map (
+                            function
+                            | Json.True -> ExportCurrentAssembly
+                            | Json.String s -> ExportByName s
+                            | _ -> argError (sprintf "Invalid value in %s for JavaScriptExport, expecting true or false or an array of strings." fileName)
+                        ) |> Array.ofSeq
+                    | _ -> argError (sprintf "Invalid value in %s for JavaScriptExport, expecting true or false or an array of strings." fileName) 
+                res <- { res with JavaScriptExport = Array.append this.JavaScriptExport j }
             | "jsoutput" ->
                 res <- { res with JSOutputPath = Some (getPath k v) }
             | "minjsoutput" ->
                 res <- { res with MinJSOutputPath = Some (getPath k v) }
+            | "singlenojserrors" ->
+                res <- { res with SingleNoJSErrors = getBool k v }
+            | "proxytargetname" ->
+                res <- { res with ProxyTargetName = Some (getString k v) }
+            | "usejavascriptsymbol" ->
+                res <- { res with UseJavaScriptSymbol = getBool k v }
             | "$schema" -> ()
-            | _ -> failwithf "Unrecognized setting in wsconfig.json: %s" k 
+            | _ -> failwithf "Unrecognized setting in %s: %s" fileName k 
         res
-
-let readStrongNameKeyPair p = StrongNameKeyPair(File.ReadAllBytes(p))
     
 module ExecuteCommands =
     
@@ -210,9 +254,9 @@ module ExecuteCommands =
                 let di = DirectoryInfo(d)
                 if not di.Exists then
                     di.Create()
-                d
-            | None -> failwith "WebSharperBundleOutputDir property is required"
-        | Some dir -> dir
+                Some d
+            | None -> None
+        | Some out -> Some out
 
     let SendResult result =
         match result with
@@ -221,9 +265,8 @@ module ExecuteCommands =
             for e in errors do
                 eprintf "%s" e
             true
-
-    let Unpack settings =
-        let webRoot = GetWebRoot settings |> Option.get
+    
+    let Unpack webRoot settings =
         printfn "unpacking into %s" webRoot
         for d in ["Scripts/WebSharper"; "Content/WebSharper"] do
             let dir = DirectoryInfo(Path.Combine(webRoot, d))
@@ -248,11 +291,10 @@ module ExecuteCommands =
                     RootDirectory = webRoot
                     UnpackSourceMap = settings.SourceMap
                     UnpackTypeScript = settings.TypeScript
-                    DownloadResources = settings.DownloadResources
+                    DownloadResources = Option.isSome settings.DownloadResources
             }
         let env = Compiler.Commands.Environment.Create()
         Compiler.UnpackCommand.Instance.Execute(env, cfg)
-        |> SendResult
 
     let HtmlOutputDirectory settings =
         match TryGetOutputDir settings with
@@ -300,7 +342,7 @@ let RunInterfaceGenerator (aR: AssemblyResolver) snk config =
                     EmbeddedResources = config.Resources |> Seq.map fst
                     ProjectDir = config.ProjectDir
                     ReferencePaths = config.References
-                    StrongNameKeyPair = snk
+                    StrongNameKeyPath = snk
             }
 
         let cmp = InterfaceGenerator.Compiler.Create()
@@ -395,6 +437,8 @@ let HandleDefaultArgsAndCommands argv isFSharp =
                           default: false
   --wsoutput:<dir>      Specify output directory for WebSharper-generated files
                           available for --ws:html,bundle,bundleOnly
+  --jsoutput:<path>     Specify output file for compiled JavaScript
+  --minjsoutput:<path>  Specify output file for compiled & minified JavaScript
   --project:<path>      Location of project file
   --closures[+|-]       Enable JS closure analysis
                           default: false
@@ -427,12 +471,16 @@ let RecognizeWebSharperArg a wsArgs =
     | Flag "--dce" v -> Some { wsArgs with DeadCodeElimination = v }
     | StartsWith "--ws:" wsProjectType ->
         Some { wsArgs with ProjectType = ProjectType.Parse(wsProjectType) }
-    | Flag "--dlres" v -> Some { wsArgs with DownloadResources = v }
+    | Flag "--dlres" v -> Some { wsArgs with DownloadResources = if v then Some true else None }
     | Flag "--printjs" v -> Some { wsArgs with PrintJS = v }
     | StartsWith "--wsoutput:" o ->
         Some { wsArgs with OutputDir = Some o }
     | StartsWith "--project:" p ->
         Some { wsArgs with ProjectFile = Path.Combine(Directory.GetCurrentDirectory(), p) }
+    | StartsWith "--jsoutput:" f ->
+        Some { wsArgs with JSOutputPath = Some f }
+    | StartsWith "--minjsoutput:" f ->
+        Some { wsArgs with MinJSOutputPath = Some f }
     | Flag "--closures" v ->
         Some { wsArgs with AnalyzeClosures = Some v }
     | StartsWith "--closures:" c ->
@@ -442,6 +490,12 @@ let RecognizeWebSharperArg a wsArgs =
         | _ ->
             printfn "--closures:%s argument unrecognized, must be one of: true, false, movetotop" c
             Some wsArgs
+    | StartsWith "--scriptbaseurl" u -> Some { wsArgs with ScriptBaseUrl = Some u }
+    | StartsWith "--wsconfig:" c ->
+        if File.Exists c then
+            Some (wsArgs.AddJson(File.ReadAllText c, Path.GetFileName c))
+        else 
+            argError (sprintf "Cannot find WebSharper configuration file %s" c)    
     | _ -> 
         None
 
@@ -454,4 +508,10 @@ let SetDefaultProjectFile wsArgs isFSharp =
         | [| p |] -> { wsArgs with ProjectFile = p }
         | [| |] -> argError "Cannot find project file, specify argument --project"
         | _ -> argError "Multiple project files in folder, specify argument --project"
+    | _ -> wsArgs
+
+let SetScriptBaseUrl wsArgs =
+    match wsArgs.ProjectType, wsArgs.ScriptBaseUrl with
+    | Some (Bundle | BundleOnly), None -> { wsArgs with ScriptBaseUrl = Some "/Content/" }
+    | Some Html, None -> { wsArgs with ScriptBaseUrl = Some "/Scripts/" }
     | _ -> wsArgs

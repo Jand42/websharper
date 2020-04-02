@@ -1,4 +1,23 @@
-﻿using Microsoft.FSharp.Core;
+// $begin{copyright}
+//
+// This file is part of WebSharper
+//
+// Copyright (c) 2008-2018 IntelliFactory
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you
+// may not use this file except in compliance with the License.  You may
+// obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.  See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// $end{copyright}
+using Microsoft.FSharp.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -16,6 +35,12 @@ namespace WebSharper.CSharp.Tests
     {
         [Generated(typeof(TestGenerator))]
         public static IControlBody RunTests() { return null; }
+
+        public static IControlBody RunTests(bool runServerTests)
+        {
+            Remoting.ShouldRun = runServerTests;
+            return RunTests();
+        }
 
         public string GetHelloWorld() { return "Hello " + "world!"; }
         public string HelloWorldProp => "Hello " + "world!";
@@ -95,7 +120,7 @@ namespace WebSharper.CSharp.Tests
             }
         }
 
-        [Test("try/finally in iterators, known issue: https://github.com/intellifactory/websharper/issues/542")]
+        [Test("try/finally in iterators, known issue: https://github.com/intellifactory/websharper/issues/542", TestKind.Skip)]
         public void DisposingGenerator()
         {
             foreach (var a in DisposingSeq().Take(2))
@@ -251,7 +276,7 @@ namespace WebSharper.CSharp.Tests
             Equal(Guid.Empty.ToString(), "00000000-0000-0000-0000-000000000000");
         }
 
-        [Test("goto and variable scoping, known issue: https://github.com/intellifactory/websharper/issues/542")]
+        [Test("goto and variable scoping, known issue: https://github.com/intellifactory/websharper/issues/542", TestKind.Skip)]
         public void VariableScopingGoto()
         {
             var res = 0;
@@ -266,7 +291,7 @@ namespace WebSharper.CSharp.Tests
             Equal(res, 15, "goto from inside loop");
         }
 
-        [Test("break and variable scoping, known issue: https://github.com/intellifactory/websharper/issues/542")]
+        [Test("break and variable scoping, known issue: https://github.com/intellifactory/websharper/issues/542", TestKind.Skip)]
         public void VariableScopingBreak()
         {
             var res = 0;
@@ -294,9 +319,16 @@ namespace WebSharper.CSharp.Tests
         [Test("SiteletBuilder correctness")]
         public async Task SiteletBuilderTest()
         {
-            var siteletTestLinks = await SiteletTestLinks();
-            Equal(siteletTestLinks[0], "/");
-            Equal(siteletTestLinks[1], "/person/John/Doe/30");
+            if (Remoting.ShouldRun)
+            {
+                var siteletTestLinks = await SiteletTestLinks();
+                Equal(siteletTestLinks[0], "/");
+                Equal(siteletTestLinks[1], "/person/John/Doe/30");
+            }
+            else
+            {
+                Expect(0);
+            }
         }
     }
 }
