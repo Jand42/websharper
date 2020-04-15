@@ -322,11 +322,11 @@ let resolveContent (projectFolder: string) (rootFolder: string) (st: State) (loc
     async {
         let! response =
             new Context<_>(
-                Json = st.Json,
+                Json = (fun () -> st.Json),
                 Link = link,
                 ApplicationPath = ".",
-                Metadata = st.Metadata,
-                Dependencies = st.Dependencies,
+                Metadata = (fun () -> st.Metadata),
+                Dependencies = (fun () -> st.Dependencies),
                 ResourceContext = resContext,
                 Request = Http.Request.Empty locationString,
                 RootFolder = projectFolder,
@@ -408,7 +408,7 @@ let WriteSite (aR: AssemblyResolver) (conf: Config) =
             let context =
                 new Context<_>(
                     ApplicationPath = ".",
-                    Json = st.Json,
+                    Json = (fun () -> st.Json),
                     Link = (fun action ->
                         // First try to find from action table.
                         match actionTable.TryGetValue(action) with
@@ -424,8 +424,8 @@ let WriteSite (aR: AssemblyResolver) (conf: Config) =
                                 let msg = "Failed to link to action from " + P.ShowPath rC.Path
                                 stdout.WriteLine("Warning: " + msg)
                                 "#"),
-                    Metadata = st.Metadata,
-                    Dependencies = st.Dependencies,
+                    Metadata = (fun () -> st.Metadata),
+                    Dependencies = (fun () -> st.Dependencies),
                     ResourceContext = rC.ResourceContext,
                     Request = Http.Request.Empty (P.ShowPath rC.Path),
                     RootFolder = projectFolder,

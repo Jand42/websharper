@@ -26,9 +26,9 @@ type Context<'Action>
     (
         ApplicationPath : string,
         Link : 'Action -> string,
-        Json : WebSharper.Core.Json.Provider,
-        Metadata : WebSharper.Core.Metadata.Info,
-        Dependencies : WebSharper.Core.DependencyGraph.Graph,
+        Json : unit -> WebSharper.Core.Json.Provider,
+        Metadata : unit -> WebSharper.Core.Metadata.Info,
+        Dependencies : unit -> WebSharper.Core.DependencyGraph.Graph,
         ResourceContext : WebSharper.Core.Resources.Context,
         Request : Http.Request,
         RootFolder : string,
@@ -39,9 +39,9 @@ type Context<'Action>
     inherit WebSharper.Web.Context()
     member this.Link(e) = Link e
     override this.ApplicationPath = ApplicationPath
-    override this.Json = Json
-    override this.Metadata = Metadata
-    override this.Dependencies = Dependencies
+    override this.Json = Json ()
+    override this.Metadata = Metadata ()
+    override this.Dependencies = Dependencies ()
     override this.ResourceContext = ResourceContext
     member this.Request = Request
     override this.RequestUri = Request.Uri
@@ -49,17 +49,21 @@ type Context<'Action>
     override this.UserSession = UserSession
     override this.Environment = Environment
 
+    member internal this.GetJson = Json
+    member internal this.GetMetadata = Metadata
+    member internal this.GetDependencies = Dependencies
+
 type Context(ctx: Context<obj>) =
-    inherit Context<obj>(ctx.ApplicationPath, ctx.Link, ctx.Json, ctx.Metadata, ctx.Dependencies,
+    inherit Context<obj>(ctx.ApplicationPath, ctx.Link, ctx.GetJson, ctx.GetMetadata, ctx.GetDependencies,
         ctx.ResourceContext, ctx.Request, ctx.RootFolder, ctx.UserSession, ctx.Environment)
 
     static member Map (f: 'T2 -> 'T1) (ctx: Context<'T1>) : Context<'T2> =
         Context<'T2>(
             ApplicationPath = ctx.ApplicationPath,
             Link = (ctx.Link << f),
-            Json = ctx.Json,
-            Metadata = ctx.Metadata,
-            Dependencies = ctx.Dependencies,
+            Json = ctx.GetJson,
+            Metadata = ctx.GetMetadata,
+            Dependencies = ctx.GetDependencies,
             ResourceContext = ctx.ResourceContext,
             Request = ctx.Request,
             RootFolder = ctx.RootFolder,

@@ -35,9 +35,9 @@ type Context<'Action> =
 
     new : ApplicationPath : string
         * Link : ('Action -> string)
-        * Json : WebSharper.Core.Json.Provider
-        * Metadata : WebSharper.Core.Metadata.Info
-        * Dependencies : WebSharper.Core.DependencyGraph.Graph
+        * Json : (unit -> WebSharper.Core.Json.Provider)
+        * Metadata : (unit -> WebSharper.Core.Metadata.Info)
+        * Dependencies : (unit -> WebSharper.Core.DependencyGraph.Graph)
         * ResourceContext : WebSharper.Core.Resources.Context
         * Request : Http.Request
         * RootFolder : string
