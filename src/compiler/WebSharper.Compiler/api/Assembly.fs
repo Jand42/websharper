@@ -106,6 +106,14 @@ type Assembly =
     member this.Name =
         this.Definition.Name.Name
 
+    member this.GetScripts() =
+        Assembly.GetAllResources(this.Definition)
+        |> Seq.filter (fun (r: EmbeddedFile) -> r.IsScript)
+
+    member this.GetContents() =
+        Assembly.GetAllResources(this.Definition)
+        |> Seq.filter (fun (r: EmbeddedFile) -> not r.IsScript)
+
     member this.OutputParameters(keyPair) =
         let par = Mono.Cecil.WriterParameters()
         match keyPair with

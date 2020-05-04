@@ -34,6 +34,7 @@ module CT = ContentTypes
 
 type ExpressionOptions =
     | FullMetadata
+    | NoMetadata
     | DiscardExpressions
     | DiscardInlineExpressions
     | DiscardNotInlineExpressions
@@ -96,6 +97,11 @@ type RuntimeAssembly (asm: Reflection.Assembly) =
                     with _ -> None
                 else None
             )
+
+let trace =
+    System.Diagnostics.TraceSource("WebSharper",
+        System.Diagnostics.SourceLevels.All)
+
 let Unpack
     (assemblies: seq<IAssembly>) (wsRuntimePath: string) (preMerged: option<M.Info>)
     (rootDirectory: string) (download: bool) (sourceMap: bool) (options: ExpressionOptions) =
@@ -129,6 +135,7 @@ let Unpack
                 use stream = File.OpenRead wsRuntimePath 
                 UnpackedMetadataEncoding.Decode(stream, headerCont = failIfHeaderNotUpToDate) :?> M.Info |> Some   
             with e ->
+                trace.TraceInformation("WebSharper cached sitelet metadata needs refresh: {0}", e.Message)
                 None
         else None
 
@@ -233,7 +240,8 @@ let Unpack
                     
         let graph =
             DependencyGraph.Graph.FromData(metas |> Seq.map (fun m -> m.Dependencies))
-        let fullMeta =
+        
+        let fullMeta() =
             { 
                 M.Info.UnionWithoutDependencies metas with
                     Dependencies = graph.GetData()
@@ -241,10 +249,11 @@ let Unpack
 
         let trimmedMeta =
             match options with
-            | FullMetadata -> fullMeta
-            | DiscardExpressions -> fullMeta.DiscardExpressions() 
-            | DiscardInlineExpressions -> fullMeta.DiscardInlineExpressions()
-            | DiscardNotInlineExpressions -> fullMeta.DiscardNotInlineExpressions()
+            | NoMetadata -> M.Info.Empty
+            | FullMetadata -> fullMeta()
+            | DiscardExpressions -> fullMeta().DiscardExpressions() 
+            | DiscardInlineExpressions -> fullMeta().DiscardInlineExpressions()
+            | DiscardNotInlineExpressions -> fullMeta().DiscardNotInlineExpressions()
         
         let header =
             {

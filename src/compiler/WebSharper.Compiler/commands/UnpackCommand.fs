@@ -139,22 +139,17 @@ module UnpackCommand =
                 try Some (ReferenceAssembly (loader.LoadFile p) :> U.IAssembly)
                 with _ -> None
             )
+
+        let wsRuntimePath = Path.Combine(cmd.RootDirectory, "cached.wsruntime") 
         
-        let baseDir =
-            let pathToSelf = typeof<Config>.Assembly.Location
-            Path.GetDirectoryName(pathToSelf)
-        let wsRuntimePath = Path.Combine(baseDir, "cached.wsruntime") 
-        U.Unpack
-            assemblies wsRuntimePath None
-            cmd.RootDirectory cmd.DownloadResources cmd.UnpackSourceMap U.ExpressionOptions.DiscardExpressions 
-        |> ignore
-
-        if errors.Count = 0 then
+        try
+            U.Unpack
+                assemblies wsRuntimePath None
+                cmd.RootDirectory cmd.DownloadResources cmd.UnpackSourceMap U.ExpressionOptions.DiscardExpressions 
+            |> ignore
             C.Ok
-        else
-            C.Errors (List.ofSeq errors)
-
-        C.Ok
+        with e ->
+            C.Errors (List.ofSeq [| e.Message |])
         
     let Description =
         "unpacks resources from WebSharper assemblies"

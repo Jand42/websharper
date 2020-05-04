@@ -71,10 +71,34 @@ let Initialize (binDir, wwwRoot) =
 
             let wsRuntimePath = Path.Combine(binDir, "cached.wsruntime") 
 
+            let downloadResources =
+                match Context.GetSetting "WebSharperDownloadResources" with
+                | Some s -> 
+                    match bool.TryParse(s) with
+                    | true, dl -> dl
+                    | _ -> false
+                | None -> false
+
+            let sourceMap =
+                match Context.GetSetting "WebSharperSourceMap" with
+                | Some s -> 
+                    match bool.TryParse(s) with
+                    | true, sm -> sm
+                    | _ -> false
+                | None -> false
+
+            let expressionOptions =
+                match Context.GetSetting "WebSharperSharedMetadata" with
+                | Some "None" -> U.ExpressionOptions.NoMetadata
+                | Some "Inlines" -> U.ExpressionOptions.DiscardNotInlineExpressions
+                | Some "NotInlines" -> U.ExpressionOptions.DiscardInlineExpressions
+                | Some "Full" | None -> U.ExpressionOptions.FullMetadata
+                | _ -> U.ExpressionOptions.DiscardExpressions
+
             let m, d =
                 U.Unpack
                     assemblies wsRuntimePath None
-                    wwwRoot true true U.ExpressionOptions.DiscardExpressions 
+                    wwwRoot downloadResources sourceMap expressionOptions
 
             let after = System.DateTime.UtcNow
             trace.TraceInformation("Initialized WebSharper in {0} seconds.",
