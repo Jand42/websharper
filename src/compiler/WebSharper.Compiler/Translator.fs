@@ -45,7 +45,7 @@ type CheckNoInvalidJSForms(comp: Compilation, isInline, name) as this =
     override this.TransformFieldGet (_,_,_) = invalidForm "FieldGet"
     override this.TransformFieldSet (_,_,_,_) = invalidForm "FieldSet"
     override this.TransformLet (a, b, c) = if isInline then base.TransformLet(a, b, c) else invalidForm "Let" 
-    override this.TransformLetRec (_,_) = invalidForm "LetRec"
+    override this.TransformLetRec (a,b) = if isInline then base.TransformLetRec(a, b) else invalidForm "LetRec"
     override this.TransformStatementExpr (a, b) = if isInline then base.TransformStatementExpr(a, b) else invalidForm "StatementExpr"
     override this.TransformAwait _  = invalidForm "Await"
     override this.TransformNamedParameter (_,_) = invalidForm "NamedParameter"
@@ -205,7 +205,7 @@ let defaultRemotingProvider =
     TypeDefinition {
         Assembly = "WebSharper.Main"
         FullName =  "WebSharper.Remoting+AjaxRemotingProvider"
-    }, []
+    }, ConstructorInfo.Default(), []
     
 let private getItem n x = ItemGet(x, Value (String n), Pure)
 let private getIndex n x = ItemGet(x, Value (Int n), Pure)
@@ -723,8 +723,16 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
         comp.CloseMacros()
         compileMethods()
 
-    static member CompileExpression (comp, expr) =
-        DotNetToJavaScript(comp).TransformExpression(expr)
+    member this.TransformExpressionWithNode(expr, node) =
+        match node with
+        | Some n ->
+            currentNode <- n
+        | _ ->
+            currentNode <- M.ExtraBundleEntryPointNode ("Expr", System.Guid.NewGuid().ToString()) // unique new node
+        this.TransformExpression(expr) |> breakExpr
+    
+    static member CompileExpression (comp, expr, ?node) =
+        DotNetToJavaScript(comp).TransformExpressionWithNode(expr, node)
 
     member this.AnotherNode() = DotNetToJavaScript(comp, currentNode :: inProgress)    
 
@@ -928,19 +936,27 @@ type DotNetToJavaScript private (comp: Compilation, ?inProgress) =
                 | M.RemoteSend -> "Send", sendRpcMethodNode
                 | M.RemoteSync -> "Sync", syncRpcMethodNode
             let remotingProvider =
-                let rpTyp, rpArgs =
+                let rpTyp, rpCtor, rpArgs =
                     match rh with
                     | Some (rp, p) -> 
-                        rp, 
-                        let toParamValue o = o |> M.ParameterObject.ToObj |> ReadLiteral |> Value
-                        match p with
-                        | None -> []
-                        | Some (M.ParameterObject.Array ps) ->
-                            ps |> Seq.map toParamValue |> List.ofSeq   
-                        | Some p ->
-                            [ toParamValue p ]
+                        let paramInfo =
+                            let getParamInfo o = 
+                                let v = o |> M.ParameterObject.ToObj 
+                                let argType = 
+                                    if isNull v then 
+                                        NonGenericType Definitions.String 
+                                    else 
+                                        Reflection.ReadType (v.GetType())
+                                argType, v |> ReadLiteral |> Value
+                            match p with
+                            | None -> []
+                            | Some (M.ParameterObject.Array ps) ->
+                                ps |> Seq.map getParamInfo |> List.ofSeq   
+                            | Some p ->
+                                [ getParamInfo p ]
+                        rp, Constructor { CtorParameters = paramInfo |> List.map fst }, paramInfo |> List.map snd 
                     | _ -> defaultRemotingProvider   
-                this.TransformCtor(NonGeneric rpTyp, ConstructorInfo.Default(), rpArgs) 
+                this.TransformCtor(NonGeneric rpTyp, rpCtor, rpArgs) 
             if comp.HasGraph then
                 this.AddDependency(mnode)
                 let rec addTypeDeps (t: Type) =
