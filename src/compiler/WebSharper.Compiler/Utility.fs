@@ -36,10 +36,6 @@ module internal Utility =
             use r = new StreamReader(s)
             Some (r.ReadToEnd()))
 
-    let IsWebResourceAttribute (fullName: string) =
-        ["System.Web.UI.WebResourceAttribute"; "WebSharper.WebResourceAttribute"]
-        |> List.contains fullName
-
     /// Like `ReadResourceFromAssembly`, but checks if it is marked as WebResource.
     /// First consults if the resource has been marked with WebResourceAttribute, and if yes,
     /// uses the annotation to determine content type.
@@ -51,7 +47,7 @@ module internal Utility =
                 let explicit =
                     CustomAttributeData.GetCustomAttributes(ty.Assembly)
                     |> Seq.tryPick (fun attr ->
-                        if IsWebResourceAttribute attr.Constructor.DeclaringType.FullName then
+                        if WebSharper.Core.Unpacking.IsWebResourceAttribute attr.Constructor.DeclaringType.FullName then
                             match [for a in attr.ConstructorArguments -> a.Value] with
                             | [(:? string as n); (:? string as contentType)] ->
                                 if n.Contains(name) // TODO: better checking here.
