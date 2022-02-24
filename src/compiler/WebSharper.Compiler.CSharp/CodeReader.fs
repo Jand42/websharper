@@ -257,10 +257,13 @@ type SymbolReader(comp : WebSharper.Compiler.Compilation) as self =
 
     member this.ReadNamedTypeDefinition (x: INamedTypeSymbol) =
         let res =
-            Hashed {
-                Assembly = comp.FindProxiedAssembly(getContainingAssemblyName x)
-                FullName = getTypeFullName x
-            }
+            try
+                Hashed {
+                    Assembly = comp.FindProxiedAssembly(getContainingAssemblyName x)
+                    FullName = getTypeFullName x
+                }
+            with e ->
+                failwith "%s on %s" e.Message x.Name 
 
         this.RegisterCustomType res x
 

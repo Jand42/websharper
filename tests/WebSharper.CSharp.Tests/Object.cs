@@ -195,7 +195,7 @@ namespace WebSharper.CSharp.Tests
             int Foo() => 2;
         }
 
-        [Test("C# interface default implementations", TestKind.Skip)]
+        [Test("C# interface default implementations")]
         public void InterfaceDefaultImplementations()
         {
             var o = new TestDefaultImpl();

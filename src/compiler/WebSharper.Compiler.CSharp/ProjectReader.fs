@@ -216,7 +216,9 @@ let baseCtor thisExpr (t: Concrete<TypeDefinition>) c a =
 
 let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp: Compilation) (thisDef: TypeDefinition) (annot: A.TypeAnnotation) (cls: INamedTypeSymbol) =
     let isStruct = cls.TypeKind = TypeKind.Struct
-    if cls.TypeKind <> TypeKind.Class && not isStruct then None else
+    let isInterface = cls.TypeKind = TypeKind.Interface
+    let isClass = cls.TypeKind = TypeKind.Class
+    if not (isStruct || isInterface || isClass) then None else
     
     if isResourceType sr cls then
         if comp.HasGraph then
@@ -1206,7 +1208,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
         if annot.IsStub || hasStubMember
         then NotResolvedClassKind.Stub
         elif cls.IsStatic then NotResolvedClassKind.Static
-        elif (annot.IsJavaScript && cls.IsAbstract) || (annot.Prototype = Some true)
+        elif (annot.IsJavaScript && cls.IsAbstract && not isInterface) || (annot.Prototype = Some true)
         then NotResolvedClassKind.WithPrototype
         else NotResolvedClassKind.Class
 
@@ -1220,7 +1222,7 @@ let private transformClass (rcomp: CSharpCompilation) (sr: R.SymbolReader) (comp
             Kind = ckind
             IsProxy = Option.isSome annot.ProxyOf
             Macros = annot.Macros
-            ForceNoPrototype = (annot.Prototype = Some false)
+            ForceNoPrototype = (annot.Prototype = Some false) || isInterface
             ForceAddress = false
         }
     )
@@ -1334,6 +1336,7 @@ let transformAssembly (comp : Compilation) (config: WsConfig) (rcomp: CSharpComp
         match t.TypeKind with
         | TypeKind.Interface ->
             transformInterface sr a t |> Option.iter comp.AddInterface
+            transformClass rcomp sr comp d a t |> Option.iter comp.AddClass
         | TypeKind.Struct | TypeKind.Class ->
             transformClass rcomp sr comp d a t |> Option.iter comp.AddClass
         | _ -> ()
