@@ -303,9 +303,9 @@ module Server =
 
     [<JavaScript; Struct; System.Serializable>]
     type Struct =
-        val X : int
+        val public X : int
         [<Name "yyStructTest">]
-        val YStructTest : string
+        val public YStructTest : string
         new (x, y) = { X = x; YStructTest = y }
 
     [<Remote>]

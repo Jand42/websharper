@@ -449,6 +449,16 @@ module Macro =
                     ok (call "DateTimeOffset" [])
                 | C (td, args) ->                    
                     let defaultEnc() = 
+                        let rec subclassesAndThis (t: Type) = 
+                            if t.IsSealed then 
+                                [| t |]
+                            else
+                                Array.append (
+                                    t.Assembly.GetTypes()
+                                    |> Array.filter (fun tt -> tt.BaseType = t)
+                                    |> Array.collect subclassesAndThis
+                                ) [| t |]
+
                         let top = comp.AssemblyName.Replace(".","$") + if isEnc then "_JsonEncoder" else "_JsonDecoder"
                         let key = M.CompositeEntry [ M.StringEntry top; M.TypeEntry t ]
                         match comp.GetMetadataEntries key with                    
