@@ -431,26 +431,27 @@ module Content =
         async {
             let! htmlPage = genPage context
             let writeBody (stream: Stream) =
-                let body = Seq.cache htmlPage.Body
-                let renderHead (tw: HtmlTextWriter) =
-                    let activation, bundleNames = writeResources context body (fun _ -> tw)
-                    for elem in htmlPage.Head do
-                        elem.Write(context, tw)
-                    if Option.isSome activation then
-                        tw.WriteStartCode(context.ResourceContext.ScriptBaseUrl, ?activation = activation, ?bundleNames = bundleNames)
-                let renderBody (tw: HtmlTextWriter) =
-                    for elem in body do
-                        elem.Write(context, tw)
-                // Create html writer from stream
-                use textWriter = new StreamWriter(stream, System.Text.Encoding.UTF8, 1024, leaveOpen = true)
-                use htmlWriter = new HtmlTextWriter(textWriter, " ")
-                htmlPage.Renderer htmlPage.Doctype htmlPage.Title
-                    renderHead renderBody htmlWriter
-                textWriter.Flush()
+                task {
+                    let body = Seq.cache htmlPage.Body
+                    let renderHead (tw: HtmlTextWriter) =
+                        let activation, bundleNames = writeResources context body (fun _ -> tw)
+                        for elem in htmlPage.Head do
+                            elem.Write(context, tw)
+                        if Option.isSome activation then
+                            do! tw.WriteStartCode(context.ResourceContext.ScriptBaseUrl, ?activation = activation, ?bundleNames = bundleNames)
+                    let renderBody (tw: HtmlTextWriter) =
+                        for elem in body do
+                            elem.Write(context, tw)
+                    // Create html writer from stream
+                    use textWriter = new StreamWriter(stream, System.Text.Encoding.UTF8, 1024, leaveOpen = true)
+                    use htmlWriter = new HtmlTextWriter(textWriter, " ")
+                    do! htmlPage.Renderer htmlPage.Doctype htmlPage.Title renderHead renderBody htmlWriter
+                    textWriter.Flush()
+                } :> Task
             return {
                 Status = Http.Status.Ok
                 Headers = [Http.Header.Custom "Content-Type" "text/html; charset=utf-8"]
-                WriteBody = Http.WriteBody writeBody
+                WriteBody = Http.WriteBodyAsync writeBody
             }
         }
 

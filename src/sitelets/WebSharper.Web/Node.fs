@@ -22,12 +22,13 @@ namespace WebSharper.Web
 
 open WebSharper.Core.Resources
 open WebSharper
+open System.Threading.Tasks
 module M = WebSharper.Core.Metadata
 
 type INode =
     inherit IRequiresResources
 
-    abstract member Write : Web.Context * HtmlTextWriter -> unit
+    abstract member Write : Web.Context * HtmlTextWriter -> Task
 
     abstract member IsAttribute : bool
 
@@ -51,7 +52,7 @@ type BundleNode(bundle: string, ?node: INode, ?reqs: ClientCode seq) =
             | Some n ->
                 n.Write(c, w)
             | _ ->
-                ()
+                Task.CompletedTask
 
         member this.IsAttribute = 
             match node with

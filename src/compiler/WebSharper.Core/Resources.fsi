@@ -22,26 +22,30 @@
 module WebSharper.Core.Resources
 
 open System
+open System.Threading.Tasks
 
 type HtmlTextWriter =
-    inherit System.IO.TextWriter
-    member RenderBeginTag : string -> unit
-    member RenderEndTag : unit -> unit
-    member WriteBeginTag : string -> unit
-    member WriteFullBeginTag : string -> unit
-    member WriteEndTag : string -> unit
-    member WriteEncodedText : string -> unit
+    interface IDisposable
+    member WriteAsync : string -> Task
+    member WriteLineAsync : unit -> Task
+    member WriteLineAsync : string -> Task
+    member RenderBeginTag : string -> Task
+    member RenderEndTag : unit -> Task
+    member WriteBeginTag : string -> Task
+    member WriteFullBeginTag : string -> Task
+    member WriteEndTag : string -> Task
+    member WriteEncodedText : string -> Task
     member AddAttribute : string * string -> unit
-    member WriteAttribute : string * string -> unit
-    member WriteAttribute : string * string * encode: bool -> unit
+    member WriteAttribute : string * string -> Task
+    member WriteAttribute : string * string * encode: bool -> Task
     static member SelfClosingTagEnd : string
     static member TagLeftChar : char
     static member TagRightChar : char
     new : System.IO.TextWriter -> HtmlTextWriter
     new : System.IO.TextWriter * indent: string -> HtmlTextWriter
     static member IsSelfClosingTag : string -> bool
-    member WriteStartCode : scriptBaseUrl: option<string> * ?includeScriptTag: bool * ?skipAssemblyDir: bool * ?activation: (string -> unit) * ?bundleNames: string[] -> unit
-    static member WriteStartCode : writer: System.IO.TextWriter * scriptBaseUrl: option<string> * ?includeScriptTag: bool * ?skipAssemblyDir: bool * ?activation: (string -> unit) * ?bundleNames: string[] -> unit
+    member WriteStartCode : scriptBaseUrl: option<string> * ?includeScriptTag: bool * ?skipAssemblyDir: bool * ?activation: (string -> unit) * ?bundleNames: string[] -> Task
+    static member WriteStartCode : writer: System.IO.TextWriter * scriptBaseUrl: option<string> * ?includeScriptTag: bool * ?skipAssemblyDir: bool * ?activation: (string -> unit) * ?bundleNames: string[] -> Task
 
 type MediaType =
     | Css
@@ -59,10 +63,10 @@ type Rendering =
     | RenderLink of string
     | Skip
 
-    member Emit : HtmlTextWriter * MediaType * ?defaultToHttp: bool -> unit
-    member Emit : (RenderLocation -> HtmlTextWriter) * MediaType * ?defaultToHttp: bool -> unit
+    member Emit : HtmlTextWriter * MediaType * ?defaultToHttp: bool -> Task
+    member Emit : (RenderLocation -> HtmlTextWriter) * MediaType * ?defaultToHttp: bool -> Task
     static member GetWebResourceRendering : ctx: Context * resource: System.Type * filename: string -> Rendering
-    static member RenderCached : ctx: Context * resource: IResource * getWriter : (RenderLocation -> HtmlTextWriter) -> unit
+    static member RenderCached : ctx: Context * resource: IResource * getWriter : (RenderLocation -> HtmlTextWriter) -> Task
 
 /// Defines the context in which resources can be rendered.
 and Context =
@@ -86,7 +90,7 @@ and Context =
         WebRoot : string  
         
         /// Cache for resolved rendering of resources.
-        RenderingCache : System.Collections.Concurrent.ConcurrentDictionary<IResource, (RenderLocation -> HtmlTextWriter) -> unit>
+        RenderingCache : System.Collections.Concurrent.ConcurrentDictionary<IResource, (RenderLocation -> HtmlTextWriter) -> Task>
 
         /// Cache for resolved dependency lookups.
         ResourceDependencyCache : System.Collections.Concurrent.ConcurrentDictionary<Metadata.Node Set, IResource list>
@@ -96,7 +100,7 @@ and Context =
 and IResource =
 
     /// Renders the resource to a given TextWriter.
-    abstract member Render : Context -> ((RenderLocation -> HtmlTextWriter) -> unit)
+    abstract member Render : Context -> ((RenderLocation -> HtmlTextWriter) -> Task)
 
 /// A resource value appending nothing.
 val EmptyResource : IResource

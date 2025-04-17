@@ -283,9 +283,7 @@ type Graph =
                                 member this.Render ctx =
                                     fun writer ->
                                         let writer = writer R.Scripts
-                                        writer.Write("<!-- ")
-                                        writer.Write("Failed to load: {0}; because of: {1}", t, e.Message)
-                                        writer.WriteLine(" -->")
+                                        writer.WriteLineAsync($"<!-- Failed to load: {t}; because of: {e.Message} -->")
                         }
                 | _ -> failwith "not a resource node"
             )

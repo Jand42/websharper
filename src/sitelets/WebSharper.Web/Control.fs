@@ -20,6 +20,7 @@
 
 namespace WebSharper.Web
 
+open System.Threading.Tasks
 open WebSharper
 open WebSharper.Core
 
@@ -34,7 +35,7 @@ type Require (t: System.Type, [<System.ParamArray>] parameters: obj[]) =
             if parameters.Length = 0 then None else Some(M.ParameterObject.OfObj parameters))]
 
     interface INode with
-        member this.Write(_, _) = ()
+        member this.Write(_, _) = Task.CompletedTask
         member this.IsAttribute = false
 
     interface IRequiresResources with
@@ -59,7 +60,7 @@ type Control() =
     interface INode with
         member this.IsAttribute = false
         member this.Write (ctx, w) =
-            w.Write("""<div ws-{0}></div>""", this.ID)
+            w.WriteAsync($"""<div ws-{this.ID}></div>""")
 
     [<JavaScript>]
     abstract member Body : IControlBody
@@ -120,7 +121,7 @@ type Control() =
                 failwithf "address not found for deserializer for Web.Control type %s" (this.GetType().AssemblyQualifiedName)
 
     member this.Render (writer: WebSharper.Core.Resources.HtmlTextWriter) =
-        writer.WriteLine("<div ws-{0}></div>", this.ID)
+        writer.WriteLineAsync($"<div ws-{ this.ID}></div>")
 
 open WebSharper.JavaScript
 open Microsoft.FSharp.Quotations

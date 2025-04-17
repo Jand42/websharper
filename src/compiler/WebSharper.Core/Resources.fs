@@ -24,22 +24,27 @@ open System
 open System.IO
 open System.Net
 open System.Reflection
+open System.Threading.Tasks
 
 open WebSharper.Constants
 
 module CT = ContentTypes
     
 type HtmlTextWriter(w: TextWriter, indent: string) =
-    inherit System.IO.TextWriter(w.FormatProvider)
+    //inherit System.IO.TextWriter(w.FormatProvider)
 
     let mutable tagStack = System.Collections.Generic.Stack()
     let currentAttributes = ResizeArray()
 
     new (w) = new HtmlTextWriter(w, "\t")
 
-    override this.Write(c: char) = w.Write(c)
-    override this.Write(s: string) = w.Write(s)
-    override this.Encoding = w.Encoding
+    interface IDisposable with
+        member this.Dispose() = w.Dispose()
+
+    member this.WriteAsync(s: string) = w.WriteAsync(s)
+    member this.WriteLineAsync() = w.WriteLineAsync()
+    member this.WriteLineAsync(s: string) = w.WriteLineAsync(s)
+    //override this.Encoding = w.Encoding
 
     member this.PushTag(name: string) =
         tagStack.Push(name)
@@ -50,48 +55,46 @@ type HtmlTextWriter(w: TextWriter, indent: string) =
         tagStack.Pop()
 
     // TODO dotnet: newlines and indentation
-    member this.RenderBeginTag(name: string) =
-        this.PushTag(name)
-        this.Write('<')
-        this.Write(name)
-        if currentAttributes.Count > 0 then
-            for struct (name, value) in currentAttributes do
-                this.WriteAttribute(name, value)
-            currentAttributes.Clear()
-        this.Write('>')
+    member this.RenderBeginTag(name: string) : Task =
+        task {
+            this.PushTag(name)
+            do! w.WriteAsync('<')
+            do! w.WriteAsync(name)
+            if currentAttributes.Count > 0 then
+                for struct (name, value) in currentAttributes do
+                    do! this.WriteAttribute(name, value)
+                currentAttributes.Clear()
+            do! w.WriteAsync('>')
+        }
 
     member this.RenderEndTag() =
         this.WriteEndTag(this.PopTag())
 
     member this.WriteBeginTag(name: string) =
-        this.Write("<")
-        this.Write(name)
+        w.WriteAsync($"<{name}")
 
     member this.WriteFullBeginTag(name: string) =
-        this.WriteBeginTag(name)
-        this.Write(">")
+        w.WriteAsync($"<{name}>")
 
     member this.WriteEndTag(name) =
-        this.Write("</")
-        this.Write(name)
-        this.Write(">")
+        w.WriteAsync($"</{name}>")
 
     member this.WriteEncodedText(text: string) =
-        WebUtility.HtmlEncode(text, w)
+        w.WriteAsync(WebUtility.HtmlEncode(text))
 
     member this.AddAttribute(name: string, value: string) =
         currentAttributes.Add(struct (name, value))
 
-    member this.WriteAttribute(name: string, value: string) =
-        this.WriteAttribute(name, value, true)
+    member this.WriteAttribute(name: string, value: string) : Task =
+        this.WriteAttribute(name, value, true) 
 
-    member this.WriteAttribute(name: string, value: string, encode: bool) =
-        this.Write(" {0}=\"", name)
-        if encode then
-            WebUtility.HtmlEncode(value, w)
-        else
-            w.Write(value)
-        this.Write("\"")
+    member this.WriteAttribute(name: string, value: string, encode: bool) : Task =
+        let encValue =
+            if not encode then
+                value
+            else
+                WebUtility.HtmlEncode(value)
+        w.WriteAsync($" {name}=\"{encValue}\"")
 
     static member SelfClosingTagEnd = " />"
 
@@ -123,46 +126,50 @@ type HtmlTextWriter(w: TextWriter, indent: string) =
             "wbr"
         ]
 
-    member this.WriteStartCode(scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool, ?activation: string -> unit, ?bundleNames: string[]) =
-        let includeScriptTag = defaultArg includeScriptTag true
-        let skipAssemblyDir = defaultArg skipAssemblyDir false
-        match bundleNames with
-        | Some bundles ->
-            match scriptBaseUrl with
-            | Some url -> 
+    member this.WriteStartCode(scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool, ?activation: string -> unit, ?bundleNames: string[]) : Task =
+        task {
+            let includeScriptTag = defaultArg includeScriptTag true
+            let skipAssemblyDir = defaultArg skipAssemblyDir false
+            match bundleNames with
+            | Some bundles ->
+                match scriptBaseUrl with
+                | Some url -> 
+                    if includeScriptTag then
+                        for b in bundles do
+                            do! w.WriteLineAsync($"""<script src="{url}{b}.js"></script>""")
+                        do! w.WriteLineAsync("""<script>""")
+                    do! w.WriteLineAsync("""document.addEventListener("DOMContentLoaded", () => {""")
+                    do! w.WriteLineAsync($"""wsbundle.Runtime.ScriptBasePath = '{url}';""")
+                    if skipAssemblyDir then
+                        do! w.WriteLineAsync("""wsbundle.Runtime.ScriptSkipAssemblyDir = true;""")
+                    match activation with
+                    | None -> ()
+                    | Some a -> a url
+                    do! w.WriteLineAsync("});")
+                | None -> ()
+            | _ ->
                 if includeScriptTag then
-                    for b in bundles do
-                        this.WriteLine("""<script src="{0}{1}.js"></script>""", url, b)
-                    this.WriteLine("""<script>""")
-                this.WriteLine("""document.addEventListener("DOMContentLoaded", () => {""")
-                this.WriteLine("""wsbundle.Runtime.ScriptBasePath = '{0}';""", url)
-                if skipAssemblyDir then
-                    this.WriteLine("""wsbundle.Runtime.ScriptSkipAssemblyDir = true;""")
-                match activation with
+                    do! w.WriteLineAsync($"""<script type="{CT.Text.Module.Text}">""")
+                match scriptBaseUrl with
+                | Some url -> 
+                    do! w.WriteLineAsync($"""import Runtime from "{url}WebSharper.Core.JavaScript/Runtime.js";""")
+                    do! w.WriteLineAsync($"""Runtime.ScriptBasePath = '{url}';""")
+                    if skipAssemblyDir then
+                        do! w.WriteLineAsync("""Runtime.ScriptSkipAssemblyDir = true;""")
+                    match activation with
+                    | None -> ()
+                    | Some a -> a url
                 | None -> ()
-                | Some a -> a url
-                this.WriteLine("});")
-            | None -> ()
-        | _ ->
             if includeScriptTag then
-                this.WriteLine("""<script type="{0}">""", CT.Text.Module.Text)
-            match scriptBaseUrl with
-            | Some url -> 
-                this.WriteLine("""import Runtime from "{0}WebSharper.Core.JavaScript/Runtime.js";""", url)
-                this.WriteLine("""Runtime.ScriptBasePath = '{0}';""", url)
-                if skipAssemblyDir then
-                    this.WriteLine("""Runtime.ScriptSkipAssemblyDir = true;""")
-                match activation with
-                | None -> ()
-                | Some a -> a url
-            | None -> ()
-        if includeScriptTag then
-            this.WriteLine("""</script>""")
+                do! w.WriteLineAsync("""</script>""")
+        }
 
-    static member WriteStartCode(writer: TextWriter, scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool, ?activation: string -> unit, ?bundleNames: string[]) =
-        writer.WriteLine()
-        use w = new HtmlTextWriter(writer)
-        w.WriteStartCode(scriptBaseUrl, ?includeScriptTag = includeScriptTag, ?skipAssemblyDir = skipAssemblyDir, ?activation = activation, ?bundleNames = bundleNames)
+    static member WriteStartCode(writer: TextWriter, scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool, ?activation: string -> unit, ?bundleNames: string[]) : Task =
+        task {
+            do! writer.WriteLineAsync()
+            use w = new HtmlTextWriter(writer)
+            do! w.WriteStartCode(scriptBaseUrl, ?includeScriptTag = includeScriptTag, ?skipAssemblyDir = skipAssemblyDir, ?activation = activation, ?bundleNames = bundleNames)
+        }
 
 type Rendering =
     | RenderInline of string
@@ -191,12 +198,12 @@ type Context =
         GetSetting : string -> option<string>
         GetWebResourceRendering : Type -> string -> Rendering
         WebRoot : string  
-        RenderingCache : System.Collections.Concurrent.ConcurrentDictionary<IResource, (RenderLocation -> HtmlTextWriter) -> unit>
+        RenderingCache : System.Collections.Concurrent.ConcurrentDictionary<IResource, (RenderLocation -> HtmlTextWriter) -> Task>
         ResourceDependencyCache : System.Collections.Concurrent.ConcurrentDictionary<Metadata.Node Set, IResource list>
     }
 
 and IResource =
-    abstract member Render : Context -> ((RenderLocation -> HtmlTextWriter) -> unit)
+    abstract member Render : Context -> ((RenderLocation -> HtmlTextWriter) -> Task)
 
 type IDownloadableResource =
     abstract Unpack : string -> unit    
@@ -211,38 +218,46 @@ let cleanLink dHttp (url: string) =
         then "http:" + url
         else url
 
-let link dHttp (html: HtmlTextWriter) (url: string) =
-    if not (String.IsNullOrWhiteSpace(url)) then
-        html.AddAttribute("type", CT.Text.Css.Text)
-        html.AddAttribute("rel", "stylesheet")
-        html.AddAttribute("href", cleanLink dHttp url)
-        html.RenderBeginTag "link"
-        html.RenderEndTag()
-        html.WriteLine()
+let link dHttp (html: HtmlTextWriter) (url: string) : Task =
+    task {
+        if not (String.IsNullOrWhiteSpace(url)) then
+            html.AddAttribute("type", CT.Text.Css.Text)
+            html.AddAttribute("rel", "stylesheet")
+            html.AddAttribute("href", cleanLink dHttp url)
+            do! html.RenderBeginTag "link"
+            do! html.RenderEndTag()
+            do! html.WriteLineAsync()
+    }
 
-let inlineStyle (html: HtmlTextWriter) (text: string) =
-    if not (String.IsNullOrWhiteSpace(text)) then
-        html.AddAttribute("type", CT.Text.Css.Text)
-        html.RenderBeginTag "style"
-        html.Write(text)
-        html.RenderEndTag()
-        html.WriteLine()
+let inlineStyle (html: HtmlTextWriter) (text: string) : Task =
+    task {
+        if not (String.IsNullOrWhiteSpace(text)) then
+            html.AddAttribute("type", CT.Text.Css.Text)
+            do! html.RenderBeginTag "style"
+            do! html.WriteAsync(text)
+            do! html.RenderEndTag()
+            do! html.WriteLineAsync()
+    }
 
-let script dHttp (html: HtmlTextWriter) isModule (url: string) =
-    if not (String.IsNullOrWhiteSpace(url)) then
-        html.AddAttribute("src", cleanLink dHttp url)
-        html.AddAttribute("type", if isModule then CT.Text.Module.Text else CT.Text.JavaScript.Text)
-        html.AddAttribute("charset", "UTF-8")
-        html.RenderBeginTag "script"
-        html.RenderEndTag()
+let script dHttp (html: HtmlTextWriter) isModule (url: string) : Task =
+    task {
+        if not (String.IsNullOrWhiteSpace(url)) then
+            html.AddAttribute("src", cleanLink dHttp url)
+            html.AddAttribute("type", if isModule then CT.Text.Module.Text else CT.Text.JavaScript.Text)
+            html.AddAttribute("charset", "UTF-8")
+            do! html.RenderBeginTag "script"
+            do! html.RenderEndTag()
+    }
 
-let inlineScript (html: HtmlTextWriter) isModule (text: string) =
-    if not (String.IsNullOrWhiteSpace(text)) then
-        html.AddAttribute("type", if isModule then CT.Text.Module.Text else CT.Text.JavaScript.Text)
-        html.AddAttribute("charset", "UTF-8")
-        html.RenderBeginTag "script"
-        html.Write(text)
-        html.RenderEndTag()
+let inlineScript (html: HtmlTextWriter) isModule (text: string) : Task =
+    task { 
+        if not (String.IsNullOrWhiteSpace(text)) then
+            html.AddAttribute("type", if isModule then CT.Text.Module.Text else CT.Text.JavaScript.Text)
+            html.AddAttribute("charset", "UTF-8")
+            do! html.RenderBeginTag "script"
+            do! html.WriteAsync(text)
+            do! html.RenderEndTag()
+    }
 
 let thisAssemblyToken =
     typeof<Rendering>.Assembly.GetName().GetPublicKeyToken()
@@ -265,7 +280,7 @@ type Rendering with
             | Css -> link dHttp html url
             | Js -> script dHttp html false url
             | JsModule -> script dHttp html true url
-        | Rendering.Skip -> ()
+        | Rendering.Skip -> Task.CompletedTask
 
     static member GetWebResourceRendering(ctx: Context, resource: Type, filename: string) =
         ctx.GetWebResourceRendering resource filename
@@ -291,7 +306,7 @@ let tryGetUriFileName (u: string) =
         None
 
 let EmptyResource =
-   { new IResource with member this.Render _ = ignore }
+   { new IResource with member this.Render _ = fun _ -> Task.CompletedTask }
 
 type BaseResource(kind: Kind) as this =
         
@@ -394,10 +409,12 @@ type BaseResource(kind: Kind) as this =
                         )
                     else urls
                 fun writer ->
-                    for url, isCss in urls do
-                        if isCss then
-                            link dHttp (writer Styles) url
-                        else script dHttp (writer Scripts) false url
+                    task {
+                        for url, isCss in urls do
+                            if isCss then
+                                do! link dHttp (writer Styles) url
+                            else do! script dHttp (writer Scripts) false url
+                    }
 
     interface IDownloadableResource with
         member this.Unpack path =
@@ -461,6 +478,6 @@ type Runtime() =
             let t = typeof<WebSharper.Core.JavaScript.Syntax.Expression>
             let ren = Rendering.GetWebResourceRendering(ctx, t, name)
             //fun writer -> ren.Emit(writer, JsModule, ctx.DefaultToHttp)
-            ignore
+            fun _ -> Task.CompletedTask
 
     static member Instance = Runtime() :> IResource

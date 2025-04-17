@@ -20,9 +20,10 @@
 
 namespace WebSharper.Sitelets
 
+open System.Threading.Tasks
 open WebSharper
 type private HtmlTextWriter = WebSharper.Core.Resources.HtmlTextWriter
-type private Writer = HtmlTextWriter -> unit
+type private Writer = HtmlTextWriter -> Task
 
 /// Represents HTML pages with embedded WebSharper controls.
 type Page =
@@ -33,7 +34,7 @@ type Page =
         /// Title of the page, ie. contents of the <title> tag.
         Title : option<string>
         Renderer : option<string> -> option<string> -> Writer -> Writer ->
-            HtmlTextWriter -> unit
+            HtmlTextWriter -> Task
         /// Head of the page, ie. contents of the <head> tag.
         /// WebSharper-generated tags, such as script dependencies,
         /// are appended to this head.
