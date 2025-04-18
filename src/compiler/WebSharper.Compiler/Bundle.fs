@@ -153,7 +153,7 @@ module Bundling =
         let render (mode: BundleMode) (writer: StringWriter) =
             match mode with
             | BundleMode.HtmlHeaders -> 
-                use htmlHeadersWriter =
+                let htmlHeadersWriter =
                     match mode with
                     | BundleMode.HtmlHeaders -> new HtmlTextWriter(writer)
                     | _ -> new HtmlTextWriter(TextWriter.Null)
@@ -216,12 +216,11 @@ module Bundling =
 
             if concatScripts then 
                 match mode with
-                | BundleMode.JavaScript -> 
-                    o.CurrentJs.Value |> Option.iter (fun (t, _) -> writer.WriteLine(t))
-                    Res.HtmlTextWriter.WriteStartCode(writer, o.Config.ScriptBaseUrl, false, o.IsExtraBundle)
+                | BundleMode.JavaScript
                 | BundleMode.MinifiedJavaScript ->
-                    o.CurrentJs.Value |> Option.iter (fun (_, t) -> writer.WriteLine(t))
-                    Res.HtmlTextWriter.WriteStartCode(writer, o.Config.ScriptBaseUrl, false, o.IsExtraBundle)
+                    o.CurrentJs.Value |> Option.iter (fun (t, _) -> writer.WriteLine(t))
+                    let htmlWriter = Res.HtmlTextWriter(writer)
+                    htmlWriter.WriteStartCode(o.Config.ScriptBaseUrl, false, o.IsExtraBundle)
                 | _ -> ()
             else
                 match mode with

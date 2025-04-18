@@ -21,6 +21,8 @@
 /// Implements JSON encoding and decoding for client-server interaction.
 module WebSharper.Core.Json
 
+open System.Threading.Tasks
+
 module M = WebSharper.Core.Metadata
 module Re = WebSharper.Core.Resources
 
@@ -48,6 +50,9 @@ exception WriteException
 
 /// Writes raw JSON. Throws WriteError.
 val Write : System.IO.TextWriter -> Value -> unit
+
+/// Writes raw JSON. Throws WriteError.
+val WriteAsync : System.IO.TextWriter -> Value -> Task
 
 /// Converts JSON to a string. Throws WriteError.
 val Stringify : Value -> string

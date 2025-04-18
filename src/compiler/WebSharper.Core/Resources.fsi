@@ -22,9 +22,14 @@
 module WebSharper.Core.Resources
 
 open System
+open System.Threading.Tasks
 
 type HtmlTextWriter =
-    inherit System.IO.TextWriter
+    new : System.IO.TextWriter -> HtmlTextWriter
+    member Write : char -> unit
+    member Write : string -> unit
+    member WriteLine : unit -> unit
+    member WriteLine : string -> unit
     member RenderBeginTag : string -> unit
     member RenderEndTag : unit -> unit
     member WriteBeginTag : string -> unit
@@ -34,14 +39,29 @@ type HtmlTextWriter =
     member AddAttribute : string * string -> unit
     member WriteAttribute : string * string -> unit
     member WriteAttribute : string * string * encode: bool -> unit
-    static member SelfClosingTagEnd : string
-    static member TagLeftChar : char
-    static member TagRightChar : char
-    new : System.IO.TextWriter -> HtmlTextWriter
-    new : System.IO.TextWriter * indent: string -> HtmlTextWriter
-    static member IsSelfClosingTag : string -> bool
     member WriteStartCode : scriptBaseUrl: option<string> * ?includeScriptTag: bool * ?skipAssemblyDir: bool * ?activation: (string -> unit) * ?bundleNames: string[] -> unit
-    static member WriteStartCode : writer: System.IO.TextWriter * scriptBaseUrl: option<string> * ?includeScriptTag: bool * ?skipAssemblyDir: bool * ?activation: (string -> unit) * ?bundleNames: string[] -> unit
+
+type HtmlAsyncTextWriter =
+    new : System.IO.TextWriter -> HtmlAsyncTextWriter
+    member WriteAsync : char -> Task
+    member WriteAsync : string -> Task
+    member WriteLineAsync : unit -> Task
+    member WriteLineAsync : string -> Task
+    member RenderBeginTag : string -> Task
+    member RenderEndTag : unit -> Task
+    member WriteBeginTag : string -> Task
+    member WriteFullBeginTag : string -> Task
+    member WriteEndTag : string -> Task
+    member WriteEncodedText : string -> Task
+    member AddAttribute : string * string -> unit
+    member WriteAttribute : string * string -> Task
+    member WriteAttribute : string * string * encode: bool -> Task
+
+module HtmlTextWriter =
+    val IsSelfClosingTag : string -> bool
+    [<Literal>] val SelfClosingTagEnd : string = " />"
+    [<Literal>] val TagLeftChar : char = '<'
+    [<Literal>] val TagRightChar : char = '>'
 
 type MediaType =
     | Css

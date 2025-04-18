@@ -55,6 +55,7 @@ module Content =
     open System.IO
     open System.Text.RegularExpressions
     type private HtmlTextWriter = WebSharper.Core.Resources.HtmlTextWriter
+    type private HtmlAsyncTextWriter = WebSharper.Core.Resources.HtmlAsyncTextWriter
 
     type private Func<'A,'B> = System.Func<'A,'B>
 
@@ -401,11 +402,11 @@ module Content =
 
     let getSeparateResourcesAndScripts ctx controls : RenderedResources =
         use scriptsW = new StringWriter()
-        let scriptsTw = new HtmlTextWriter(scriptsW, " ")
+        let scriptsTw = new HtmlTextWriter(scriptsW)
         use stylesW = new StringWriter()
-        let stylesTw = new HtmlTextWriter(stylesW, " ")
+        let stylesTw = new HtmlTextWriter(stylesW)
         use metaW = new StringWriter()
-        let metaTw = new HtmlTextWriter(metaW, " ")
+        let metaTw = new HtmlTextWriter(metaW)
         let activation, bundleNames =
             writeResources ctx controls (function
                 | Core.Resources.Scripts -> scriptsTw
@@ -421,7 +422,7 @@ module Content =
 
     let getResourcesAndScripts ctx controls =
         use w = new StringWriter()
-        use tw = new HtmlTextWriter(w, " ")
+        let tw = new HtmlTextWriter(w)
         let activation, bundleNames = writeResources ctx controls (fun _ -> tw)
         if Option.isSome activation then
             tw.WriteStartCode(ctx.ResourceContext.ScriptBaseUrl, ?activation = activation, ?bundleNames = bundleNames)
@@ -443,14 +444,13 @@ module Content =
                         elem.Write(context, tw)
                 // Create html writer from stream
                 use textWriter = new StreamWriter(stream, System.Text.Encoding.UTF8, 1024, leaveOpen = true)
-                use htmlWriter = new HtmlTextWriter(textWriter, " ")
+                let htmlWriter = new HtmlAsyncTextWriter(textWriter)
                 htmlPage.Renderer htmlPage.Doctype htmlPage.Title
                     renderHead renderBody htmlWriter
-                textWriter.Flush()
             return {
                 Status = Http.Status.Ok
                 Headers = [Http.Header.Custom "Content-Type" "text/html; charset=utf-8"]
-                WriteBody = Http.WriteBody writeBody
+                WriteBody = Http.WriteBodyAsync writeBody
             }
         }
 
@@ -461,11 +461,11 @@ module Content =
             {
                 Status = Http.Status.Ok
                 Headers = [Http.Header.Custom "Content-Type" "application/json"]
-                WriteBody = Http.WriteBody (fun s ->
+                WriteBody = Http.WriteBodyAsync (fun s ->
                     use tw = new StreamWriter(s, System.Text.Encoding.UTF8, 1024, leaveOpen = true)
                     x
                     |> encoder.Encode
-                    |> WebSharper.Core.Json.Write tw
+                    |> WebSharper.Core.Json.WriteAsync tw
                 )
             }
 
@@ -477,11 +477,11 @@ module Content =
                 return {
                     Status = Http.Status.Ok
                     Headers = [Http.Header.Custom "Content-Type" "application/json"]
-                    WriteBody = Http.WriteBody (fun s ->
+                    WriteBody = Http.WriteBodyAsync (fun s ->
                         use tw = new StreamWriter(s, System.Text.Encoding.UTF8, 1024, leaveOpen = true)
                         x
                         |> encoder.Encode
-                        |> WebSharper.Core.Json.Write tw
+                        |> WebSharper.Core.Json.WriteAsync tw
                     )
                 }
             }
@@ -811,7 +811,7 @@ type Content<'Endpoint> with
                             use inp = new StreamReader(path)
                             let! contents = inp.ReadToEndAsync()                            
                             use scriptsW = new StringWriter()
-                            use tw = new HtmlTextWriter(scriptsW, " ")
+                            let tw = new HtmlTextWriter(scriptsW)
                             let applyCode code =
                                 ClientApply(code, [])
                             let reqs = 

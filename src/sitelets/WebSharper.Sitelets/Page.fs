@@ -21,9 +21,12 @@
 namespace WebSharper.Sitelets
 
 open System.Collections.Generic
+open System.Threading.Tasks
 open WebSharper
 open WebSharper.Web
+open System.IO
 type private HtmlTextWriter = WebSharper.Core.Resources.HtmlTextWriter
+type private HtmlAsyncTextWriter = WebSharper.Core.Resources.HtmlAsyncTextWriter
 type private Writer = HtmlTextWriter -> unit
 
 type Page =
@@ -31,35 +34,43 @@ type Page =
         Doctype : option<string>
         Title : option<string>
         Renderer : option<string> -> option<string> -> Writer -> Writer ->
-            HtmlTextWriter -> unit
+            HtmlAsyncTextWriter -> Task
         Head : seq<INode>
         Body : seq<INode>
     }
 
     static member Default =
         let renderer (doctype : option<string>) (title: option<string>)
-            writeHead writeBody (writer: HtmlTextWriter) =
-            // Doctype
-            match doctype with
-            | Some dt -> writer.WriteLine dt
-            | None -> ()
-            writer.RenderBeginTag "html"
-            // Head section
-            writer.RenderBeginTag "head"
-            match title with
-            | Some t ->
-                writer.WriteFullBeginTag "title"
-                writer.Write t
-                writer.WriteEndTag "title"
-                writer.WriteLine()
-            | None -> ()
-            writeHead writer
-            writer.RenderEndTag()
-            // Body section
-            writer.RenderBeginTag "body"
-            writeBody writer
-            writer.RenderEndTag()
-            writer.RenderEndTag()
+            (writeHead : Writer) (writeBody : Writer) (writer: HtmlAsyncTextWriter) =
+            task {
+                // Doctype
+                match doctype with
+                | Some dt -> do! writer.WriteLineAsync dt
+                | None -> ()
+                do! writer.RenderBeginTag "html"
+                // Head section
+                do! writer.RenderBeginTag "head"
+                match title with
+                | Some t ->
+                    do! writer.WriteFullBeginTag "title"
+                    do! writer.WriteAsync t
+                    do! writer.WriteEndTag "title"
+                    do! writer.WriteLineAsync()
+                | None -> ()
+                use whead = new StringWriter()
+                let twhead = new HtmlTextWriter(whead)
+                writeHead twhead
+                do! writer.WriteAsync(whead.ToString())
+                do! writer.RenderEndTag()
+                // Body section
+                do! writer.RenderBeginTag "body"
+                use wbody = new StringWriter()
+                let twbody = new HtmlTextWriter(wbody)
+                writeBody twbody
+                do! writer.WriteAsync(wbody.ToString())
+                do! writer.RenderEndTag()
+                do! writer.RenderEndTag()
+            } :> Task
         {
             Doctype = Some "<!DOCTYPE html>"
             Title = None

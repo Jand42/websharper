@@ -475,7 +475,8 @@ let RenderDependencies(ctx: ResourceContext, writer: HtmlTextWriter, nameOfSelf,
         }
     for d in deps do
         d.Render ctx (fun _ -> writer)
-    Resources.HtmlTextWriter.WriteStartCode(writer, scriptBaseUrl)
+    writer.WriteLine()
+    writer.WriteStartCode(scriptBaseUrl)
 
 /// In BundleOnly mode, output a dummy DLL to please MSBuild
 let MakeDummyDll (path: string) (assemblyName: string) =

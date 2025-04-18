@@ -24,22 +24,21 @@ open System
 open System.IO
 open System.Net
 open System.Reflection
+open System.Threading.Tasks
 
 open WebSharper.Constants
 
 module CT = ContentTypes
     
-type HtmlTextWriter(w: TextWriter, indent: string) =
-    inherit System.IO.TextWriter(w.FormatProvider)
+type HtmlTextWriter(w: TextWriter) =
 
     let mutable tagStack = System.Collections.Generic.Stack()
     let currentAttributes = ResizeArray()
 
-    new (w) = new HtmlTextWriter(w, "\t")
-
-    override this.Write(c: char) = w.Write(c)
-    override this.Write(s: string) = w.Write(s)
-    override this.Encoding = w.Encoding
+    member this.Write(c: char) = w.Write(c)
+    member this.Write(s: string) = w.Write(s)
+    member this.WriteLine() = w.WriteLine()
+    member this.WriteLine(s: string) = w.WriteLine(s)
 
     member this.PushTag(name: string) =
         tagStack.Push(name)
@@ -86,42 +85,12 @@ type HtmlTextWriter(w: TextWriter, indent: string) =
         this.WriteAttribute(name, value, true)
 
     member this.WriteAttribute(name: string, value: string, encode: bool) =
-        this.Write(" {0}=\"", name)
-        if encode then
-            WebUtility.HtmlEncode(value, w)
-        else
-            w.Write(value)
-        this.Write("\"")
-
-    static member SelfClosingTagEnd = " />"
-
-    static member TagLeftChar = '>'
-
-    static member TagRightChar = '>'
-
-    /// Checks whether an element should be rendered as self-closing,
-    /// ie. <x /> instead of <x></x>
-    static member IsSelfClosingTag (name: string) =
-        List.exists ((=) (name.ToLowerInvariant())) [
-            "area"
-            "base"
-            "basefont"
-            "br"
-            "col"
-            "embed"
-            "frame"
-            "hr"
-            "img"
-            "input"
-            "isindex"
-            "keygen"
-            "link"
-            "meta"
-            "param"
-            "source"
-            "track"
-            "wbr"
-        ]
+        let encValue =
+            if encode then
+                WebUtility.HtmlEncode(value)
+            else
+                value
+        this.Write($" {name}=\"{encValue}\"")
 
     member this.WriteStartCode(scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool, ?activation: string -> unit, ?bundleNames: string[]) =
         let includeScriptTag = defaultArg includeScriptTag true
@@ -132,10 +101,10 @@ type HtmlTextWriter(w: TextWriter, indent: string) =
             | Some url -> 
                 if includeScriptTag then
                     for b in bundles do
-                        this.WriteLine("""<script src="{0}{1}.js"></script>""", url, b)
+                        this.WriteLine($"""<script src="{url}{b}.js"></script>""")
                     this.WriteLine("""<script>""")
                 this.WriteLine("""document.addEventListener("DOMContentLoaded", () => {""")
-                this.WriteLine("""wsbundle.Runtime.ScriptBasePath = '{0}';""", url)
+                this.WriteLine($"""wsbundle.Runtime.ScriptBasePath = '{url}';""")
                 if skipAssemblyDir then
                     this.WriteLine("""wsbundle.Runtime.ScriptSkipAssemblyDir = true;""")
                 match activation with
@@ -145,11 +114,11 @@ type HtmlTextWriter(w: TextWriter, indent: string) =
             | None -> ()
         | _ ->
             if includeScriptTag then
-                this.WriteLine("""<script type="{0}">""", CT.Text.Module.Text)
+                this.WriteLine($"""<script type="{CT.Text.Module.Text}">""")
             match scriptBaseUrl with
             | Some url -> 
-                this.WriteLine("""import Runtime from "{0}WebSharper.Core.JavaScript/Runtime.js";""", url)
-                this.WriteLine("""Runtime.ScriptBasePath = '{0}';""", url)
+                this.WriteLine($"""import Runtime from "{url}WebSharper.Core.JavaScript/Runtime.js";""")
+                this.WriteLine($"""Runtime.ScriptBasePath = '{url}';""")
                 if skipAssemblyDir then
                     this.WriteLine("""Runtime.ScriptSkipAssemblyDir = true;""")
                 match activation with
@@ -159,10 +128,96 @@ type HtmlTextWriter(w: TextWriter, indent: string) =
         if includeScriptTag then
             this.WriteLine("""</script>""")
 
-    static member WriteStartCode(writer: TextWriter, scriptBaseUrl: option<string>, ?includeScriptTag: bool, ?skipAssemblyDir: bool, ?activation: string -> unit, ?bundleNames: string[]) =
-        writer.WriteLine()
-        use w = new HtmlTextWriter(writer)
-        w.WriteStartCode(scriptBaseUrl, ?includeScriptTag = includeScriptTag, ?skipAssemblyDir = skipAssemblyDir, ?activation = activation, ?bundleNames = bundleNames)
+type HtmlAsyncTextWriter(w: TextWriter) =
+
+    let mutable tagStack = System.Collections.Generic.Stack()
+    let currentAttributes = ResizeArray()
+
+    member this.WriteAsync(c: char) = w.WriteAsync(c)
+    member this.WriteAsync(s: string) = w.WriteAsync(s)
+    member this.WriteLineAsync() = w.WriteLineAsync()
+    member this.WriteLineAsync(s: string) = w.WriteLineAsync(s)
+
+    member this.PushTag(name: string) =
+        tagStack.Push(name)
+
+    member this.PopTag() =
+        if tagStack.Count = 0 then
+            raise (System.InvalidOperationException("A PopEndTag was called without a corresponding PushEndTag."))
+        tagStack.Pop()
+
+    // TODO dotnet: newlines and indentation
+    member this.RenderBeginTag(name: string) : Task =
+        task {
+            this.PushTag(name)
+            do! w.WriteAsync('<')
+            do! w.WriteAsync(name)
+            if currentAttributes.Count > 0 then
+                for struct (name, value) in currentAttributes do
+                    do! this.WriteAttribute(name, value)
+                currentAttributes.Clear()
+            do! w.WriteAsync('>')
+        }
+
+    member this.RenderEndTag() =
+        this.WriteEndTag(this.PopTag())
+
+    member this.WriteBeginTag(name: string) =
+        w.WriteAsync($"<{name}")
+
+    member this.WriteFullBeginTag(name: string) =
+        w.WriteAsync($"<{name}>")
+
+    member this.WriteEndTag(name) =
+        w.WriteAsync($"</{name}>")
+
+    member this.WriteEncodedText(text: string) =
+        w.WriteAsync(WebUtility.HtmlEncode(text))
+
+    member this.AddAttribute(name: string, value: string) =
+        currentAttributes.Add(struct (name, value))
+
+    member this.WriteAttribute(name: string, value: string) : Task =
+        this.WriteAttribute(name, value, true) 
+
+    member this.WriteAttribute(name: string, value: string, encode: bool) : Task =
+        let encValue =
+            if not encode then
+                value
+            else
+                WebUtility.HtmlEncode(value)
+        w.WriteAsync($" {name}=\"{encValue}\"")
+
+module HtmlTextWriter =
+    /// Checks whether an element should be rendered as self-closing,
+    /// ie. <x /> instead of <x></x>
+    let IsSelfClosingTag (name: string) =
+        match name.ToLowerInvariant() with
+        | "area"
+        | "base"
+        | "basefont"
+        | "br"
+        | "col"
+        | "embed"
+        | "frame"
+        | "hr"
+        | "img"
+        | "input"
+        | "isindex"
+        | "keygen"
+        | "link"
+        | "meta"
+        | "param"
+        | "source"
+        | "track"
+        | "wbr" -> true
+        | _ -> false
+
+    let [<Literal>] SelfClosingTagEnd = " />"
+
+    let [<Literal>] TagLeftChar = '<'
+
+    let [<Literal>] TagRightChar = '>'
 
 type Rendering =
     | RenderInline of string

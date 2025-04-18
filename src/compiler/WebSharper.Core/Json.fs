@@ -24,6 +24,7 @@ open WebSharper
 open System
 open System.Collections.Generic
 open System.Reflection
+open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
 open Microsoft.FSharp.Quotations.Patterns
 open System.Linq.Expressions
@@ -307,6 +308,75 @@ let rec Write (writer: System.IO.TextWriter) (value: Value) =
                 c ','
                 pair x
             c '}'
+    match value with
+    | Null -> s "null"
+    | True -> s "true"
+    | False -> s "false"
+    | Number x -> wN x
+    | String x -> wS x
+    | Array x -> wA x
+    | Object x -> wO x
+
+let rec WriteAsync (writer: System.IO.TextWriter) (value: Value) : Task =
+    let c (x: char) = writer.WriteAsync x
+    let s (x: string) = writer.WriteAsync x
+    let wJ x = WriteAsync writer x
+    let wA x =
+        match x with
+        | [] -> s "[]"
+        | x :: xs ->
+            task {
+                do! c '['
+                do! wJ x
+                for x in xs do
+                    do! c ','
+                    do! wJ x
+                do! c ']'
+            }
+    let wN (x: string) =
+        if x <> null && numberPattern.IsMatch x then
+            s x
+        else
+            raise WriteException
+    let wS (x: string) =
+        if x = null then s "null" else
+        task {
+            do! c '"'
+            for i in 0 .. x.Length - 1 do
+                match x.[i] with
+                | '"' -> do! s "\\\""
+                | '/' -> do! s "\\/"
+                | '\\' -> do! s "\\\\"
+                | '\b' -> do! s "\\b"
+                | '\n' -> do! s "\\n"
+                | '\r' -> do! s "\\r"
+                | '\t' -> do! s "\\t"
+                | '\012' -> do! s "\\f"
+                | x ->
+                    if System.Char.IsControl x then
+                        do! writer.WriteAsync(String.Format("\\u{0:x4}", int x))
+                    else
+                        do! c x
+            do! c '"'
+        }
+    let wO x =
+        match x with
+        | [] -> s "{}"
+        | x :: xs ->
+            let pair (n, x) =
+                task {
+                    do! wS n
+                    do! c ':'
+                    do! wJ x
+                }
+            task {
+                do! c '{'
+                do! pair x
+                for x in xs do
+                    do! c ','
+                    do! pair x
+                do! c '}'
+            }
     match value with
     | Null -> s "null"
     | True -> s "true"
