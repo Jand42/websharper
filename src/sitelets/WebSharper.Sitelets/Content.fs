@@ -28,25 +28,21 @@ open WebSharper.Core
 
 module CT = WebSharper.Core.ContentTypes
 
-[<CompiledName "FSharpContent">]
+[<CompiledName "FSharpContent"; Struct>]
 type Content<'Endpoint> =
-    | CustomContent of (Context<'Endpoint> -> Http.Response)
-    | CustomContentAsync of (Context<'Endpoint> -> Async<Http.Response>)
+    | CustomContent of (Context<'Endpoint> -> Task<Http.Response>)
 
-    static member ToResponse<'T> (c: Content<'T>) (ctx: Context<'T>) : Async<Http.Response> =
+    static member ToResponse<'T> (c: Content<'T>) (ctx: Context<'T>) : Task<Http.Response> =
         match c with
-        | CustomContent x -> async.Return (x ctx)
-        | CustomContentAsync x -> x ctx
+        | CustomContent x -> x ctx
 
     member c.Box() : Content<obj> =
         match c with
         | CustomContent x -> CustomContent (fun ctx -> x (Context.Map box ctx))
-        | CustomContentAsync x -> CustomContentAsync (fun ctx -> x (Context.Map box ctx))
 
     static member Unbox (c: Content<obj>) : Content<'T> =
         match c with
         | CustomContent x -> CustomContent (fun ctx -> x (Context.Map unbox ctx))
-        | CustomContentAsync x -> CustomContentAsync (fun ctx -> x (Context.Map unbox ctx))
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Content =
@@ -458,7 +454,7 @@ module Content =
         let encoder = Json.ServerSideProvider.GetEncoder<'U>()
         Content.CustomContent <| fun ctx ->
             let x = f ctx
-            {
+            Task.FromResult {
                 Status = Http.Status.Ok
                 Headers = [Http.Header.Custom "Content-Type" "application/json"]
                 WriteBody = Http.WriteBody (fun s ->
@@ -471,10 +467,10 @@ module Content =
 
     let JsonContentAsync<'T, 'U> (f: Context<'T> -> Async<'U>) =
         let encoder = Json.ServerSideProvider.GetEncoder<'U>()
-        Content.CustomContentAsync <| fun ctx ->
-            async {
+        Content.CustomContent <| fun ctx ->
+            task {
                 let! x = f ctx
-                return {
+                return ({
                     Status = Http.Status.Ok
                     Headers = [Http.Header.Custom "Content-Type" "application/json"]
                     WriteBody = Http.WriteBody (fun s ->
@@ -483,14 +479,14 @@ module Content =
                         |> encoder.Encode
                         |> WebSharper.Core.Json.Write tw
                     )
-                }
+                } : Http.Response)
             }
 
-    let ToResponse<'T> (c: Content<'T>) (ctx: Context<'T>) : Async<Http.Response> =
-        Content<_>.ToResponse c ctx
+    let ToResponse<'T> (c: Content<'T>) (ctx: Context<'T>) : Task<Http.Response> =
+        Content<_>.ToResponse c ctx 
 
     let FromContext f =
-        Content.CustomContentAsync (fun ctx -> async {
+        Content.CustomContent (fun ctx -> task {
             let! content = f ctx
             return! ToResponse content ctx
         })
@@ -499,36 +495,29 @@ module Content =
     let ToResponseAsync c ctx = ToResponse c ctx
 
     let FromAsync ac =
-        CustomContentAsync <| fun ctx -> async {
+        CustomContent <| fun ctx -> task {
             let! c = ac
             return! ToResponse c ctx
         }
 
-    let delay1 f =
-        fun arg -> async { return f arg }
-
     let MapResponseAsync<'T> (f: Http.Response -> Async<Http.Response>) (content: Async<Content<'T>>) =
-        let genResp content =
-            match content with
-            | CustomContent gen -> delay1 gen
-            | CustomContentAsync x -> x
-        CustomContentAsync <| fun context ->
-            async {
+        CustomContent <| fun context ->
+            task {
                 let! content = content
-                let! result = genResp content context
+                let! result = 
+                    match content with
+                    | CustomContent gen -> gen context
                 return! f result
             }
         |> async.Return
 
     let MapResponse<'T> (f: Http.Response -> Http.Response) (content: Async<Content<'T>>) =
-        let genResp content =
-            match content with
-            | CustomContent gen -> delay1 gen
-            | CustomContentAsync x -> x
-        CustomContentAsync <| fun context ->
-            async {
+        CustomContent <| fun context ->
+            task {
                 let! content = content
-                let! result = genResp content context
+                let! result = 
+                    match content with
+                    | CustomContent gen -> gen context
                 return f result
             }
         |> async.Return
@@ -561,7 +550,7 @@ module Content =
     /// Emits a 301 Moved Permanently response to a given URL.
     let RedirectToUrl<'T> (url: string) : Content<'T> =
         CustomContent <| fun ctx ->
-            {
+            Task.FromResult {
                 Status = Http.Status.Custom 301 (Some "Moved Permanently")
                 Headers = [Http.Header.Custom "Location" url]
                 WriteBody = Http.EmptyBody
@@ -569,7 +558,7 @@ module Content =
 
     /// Emits a 301 Moved Permanently response to a given action.
     let Redirect<'T> (endpoint: 'T) =
-        CustomContentAsync <| fun ctx ->
+        CustomContent <| fun ctx ->
             let resp = RedirectToUrl (ctx.Link endpoint)
             ToResponse resp ctx
 
