@@ -789,10 +789,11 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
                     addStatement <| exportWithBundleSupport false typ (Some m) addr f 
                         (FuncDeclaration(f, args, thisVar, implSt(fun () -> bTr().TransformStatement b), cgen @ mgen))
                 | e ->
-                    let f = 
-                        if output = O.JavaScript then f else
-                        f.WithType(Some (TSType (getSignature fromInst)))
-                    addStatement <| export false (VarDeclaration(f, implExpr(fun () -> bTr().TransformExpression e)))
+                    if output <> O.TypeScriptDeclaration then 
+                        let f = 
+                            if output = O.JavaScript then f else
+                            f.WithType(Some (TSType (getSignature fromInst)))
+                        addStatement <| export false (VarDeclaration(f, implExpr(fun () -> bTr().TransformExpression e)))
             
             match withoutMacros info with
             | M.Instance (mname, mkind) ->
@@ -862,7 +863,8 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
         for f in c.Fields.Values do
             match f.CompiledForm with
             | M.VarField v ->
-                addStatement <| VarDeclaration(v, Undefined)
+                if output <> O.TypeScriptDeclaration then 
+                    addStatement <| VarDeclaration(v, Undefined)
             | _ -> ()
 
         // let mem (m: Method) info gc opts intfGen body =
@@ -943,15 +945,15 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
                 match ct.Expression with
                 | Function (args, thisVar, _, b) ->                  
                     constructors.Add(name, thisVar, args, b, getSignature true (Some name))
-                    let info =
-                        {
-                            IsStatic = true
-                            IsPrivate = false
-                            Kind = MemberKind.Simple
-                        }
-                    let ctorBody() =
-                        Return (New (JSThis, [], Value (String name) :: (args |> List.map Var)))
-                    members.Add (ClassMethod(info, name, args, thisVar, implStOpt ctorBody, getSignature false None |> addGenerics cgen))
+                    //let info =
+                    //    {
+                    //        IsStatic = true
+                    //        IsPrivate = false
+                    //        Kind = MemberKind.Simple
+                    //    }
+                    //let ctorBody() =
+                    //    Return (New (JSThis, [], Value (String name) :: (args |> List.map Var)))
+                    //members.Add (ClassMethod(info, name, args, thisVar, implStOpt ctorBody, getSignature false None |> addGenerics cgen))
                 | _ ->
                     failwithf "Invalid form for translated constructor"
             | M.Func (name, _) ->
@@ -1153,12 +1155,18 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
             if output <> O.JavaScript then
                 
                 let ucTypes = ResizeArray()
+                let ucNames = HashSet()
                 for uci, uc in u.Cases |> Seq.indexed do
                     
                     let tagMem() = 
                         ClassProperty(propInfo false false false, "$", TSType.Basic (string uci), None)
+                    let ucName = 
+                        if StandardLibNames.Set.Contains uc.Name then
+                            Resolve.getRenamed (uc.Name + "_1") ucNames
+                        else
+                            Resolve.getRenamed uc.Name ucNames
                     let ucId() =
-                        Id.New(uc.Name, str = true)  
+                        Id.New(ucName, str = true)  
                     match uc.Kind with
                     | M.NormalFSharpUnionCase fs ->
                         let ucmems =
@@ -1171,14 +1179,14 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
                         addStatement <| export false ( 
                             Interface(ucId(), [], tagMem() :: ucmems, cgen)
                         )
-                        ucTypes.Add(TSType.Basic uc.Name |> addGenerics cgen)
+                        ucTypes.Add(TSType.Basic ucName |> addGenerics cgen)
                     | M.ConstantFSharpUnionCase v -> 
                         ucTypes.Add(TSType.Basic v.TSType)
                     | M.SingletonFSharpUnionCase ->
                         addStatement <| export false (
                             Interface(ucId(), [], [ tagMem() ], cgen)
                         )
-                        ucTypes.Add(TSType.Basic uc.Name |> addGenerics cgen)
+                        ucTypes.Add(TSType.Basic ucName |> addGenerics cgen)
 
                 if not (TypeTranslator.CustomTranslations.ContainsKey typ) then
                     let t =
@@ -1288,7 +1296,7 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
                     packageLazyClass classDecl classExpr
                 else
                     packageClass classDecl
-
+    
     let packageInterface (typ: TypeDefinition) (i: M.InterfaceInfo) =
         match classRes.TryGetValue typ with 
         | false, _ -> ()
@@ -1340,8 +1348,11 @@ let packageType (output: O) (refMeta: M.Info) (current: M.Info) asmName (content
 
     for typ in orderedTypes do
         match current.Classes.TryFind(typ) with
-        | None
-        | Some (_, _, None) -> ()
+        | None -> ()
+        | Some (a, ct, None) -> 
+            if output <> O.JavaScript then
+                let cgen = List.init typ.Value.GenericLength (fun _ -> M.GenericParam.None)
+                packageClass typ a ct { M.ClassInfo.None with Generics = cgen }
         | Some (a, ct, Some c) ->
             packageClass typ a ct c
 
@@ -1518,7 +1529,8 @@ let packageAssembly output (refMeta: M.Info) (current: M.Info) asmName entryPoin
         let epTyp = TypeDefinition { Assembly = asmName; FullName = "$EntryPoint" }     
         let pkg = packageType output refMeta current asmName (Bundle ([| epTyp |], entryPointStyle, entryPoint))
         pkgs.Add("$EntryPoint", epTyp, pkg)
-    analyzeLazyClasses pkgs
+    if output <> O.TypeScriptDeclaration then
+        analyzeLazyClasses pkgs
     pkgs |> Seq.map (fun (fn, _, pkg) -> fn, pkg.Statements) |> Array.ofSeq
 
 let bundleAssembly output (refMeta: M.Info) (current: M.Info) asmName entryPoint entryPointStyle =

@@ -659,9 +659,21 @@ type Compilation(meta: Info, ?hasGraph) =
         else 
             Address.TypeModuleRoot m
 
+    member this.UnionTypeAddress(typ: TypeDefinition, hasWSPrototype) =
+        let m = { Assembly = this.AssemblyName; Name = typ.Value.FullName.Replace('+', '.') }
+        if hasWSPrototype then
+            Address.TypeDefaultExport m
+        else 
+            let n = (typ.Value.FullName.Split('.', '+') |> Array.last).Split('`')[0]
+            Address.TypeNamedExport m n
+
     member this.ProcessCustomType(typ: TypeDefinition, ct) =
         let getAddr hasWSPrototype = 
-            this.TypeAddress(typ, hasWSPrototype)
+            match ct with
+            | FSharpUnionInfo _ ->
+                this.UnionTypeAddress(typ, hasWSPrototype)
+            | _ -> 
+                this.TypeAddress(typ, hasWSPrototype)
         let addr, cls = 
             match classes.TryFind typ with
             | Some ({ Address = []}, _, cls) -> getAddr (cls |> Option.exists (fun c -> c.HasWSPrototype)), cls
@@ -2273,7 +2285,12 @@ type Compilation(meta: Info, ?hasGraph) =
         
         // initialize remaining non-TS-class custom types
         for KeyValue(typ, ct) in notResolvedCustomTypes do
-            let clAddr = this.TypeAddress(typ, false)
+            let clAddr = 
+                match ct with
+                | FSharpUnionInfo _ ->
+                    this.UnionTypeAddress(typ, false)
+                | _ ->
+                    this.TypeAddress(typ, false)
             classes.Add(typ, (clAddr, ct, None))
             this.ProcessCustomType(typ, ct)
 
