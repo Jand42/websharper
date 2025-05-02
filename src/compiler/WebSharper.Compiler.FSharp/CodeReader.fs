@@ -1539,12 +1539,11 @@ let scanExpression (env: Environment) (containingMethodName: string) (expr: FSha
                         let pos = e.Range.AsSourcePos
                         if expectWithValue && not withValue then
                             env.Compilation.AddWarning(Some pos, SourceWarning "Auto-quoted argument expected to have access to server-side value. Use `( )` instead of `<@ @>`.")   
-                        let e = transformExpression env e
                         let argTypes = [ for (v, _, _) in env.FreeVars -> env.SymbolReader.ReadType Map.empty v.FullType ]
                         for t in argTypes do
                             if t.CanHaveDeserializer then
                                 env.Compilation.AddTypeNeedingDeserialization(t, pos, bundleScope)
-                        let retTy = env.SymbolReader.ReadType Map.empty mem.ReturnParameter.Type
+                        let retTy = env.SymbolReader.ReadType Map.empty e.Type
                         let qm =
                             Method {
                                 Generics = 0
@@ -1553,6 +1552,7 @@ let scanExpression (env: Environment) (containingMethodName: string) (expr: FSha
                                 ReturnType = retTy
                             }
                         let argNames = [ for (v, _, _) in env.FreeVars -> v.LogicalName ]
+                        let e = transformExpression env e
                         let f = Lambda([ for (_, id, _) in env.FreeVars -> id ], None, e)
                         // emptying FreeVars so that env can be reused for reading multiple quotation arguments
                         env.FreeVars.Clear()
