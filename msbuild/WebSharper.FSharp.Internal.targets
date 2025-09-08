@@ -45,6 +45,15 @@
       <CustomAdditionalCompileInputs Include="$(WebSharperConfigFile)" />
     </ItemGroup>
   </Target>
+  
+  <UsingTask AssemblyFile="$(WebSharperTaskAssembly)" TaskName="WebSharper.MSBuild.FSharp.LogProjectReferencePathsTask" />
+  <Target Name="LogProjectReferencePaths" AfterTargets="ResolveProjectReferences" BeforeTargets="CoreCompile">
+    <LogProjectReferencePathsTask
+      ResolvedNativeProjectReferencePaths="@(_ResolvedNativeProjectReferencePaths)"
+      ResolvedProjectReferencePaths="@(_ResolvedProjectReferencePaths)"
+    />
+  </Target>
+
   <UsingTask AssemblyFile="$(WebSharperTaskAssembly)" TaskName="WebSharper.MSBuild.FSharp.ReorderCompileItemsTask" Condition=" '$(DesignTimeBuild)' == 'true' " />
   <Target Name="ReorderWebSharperGeneratedFiles" Condition=" '$(DesignTimeBuild)' == 'true' " BeforeTargets="CoreCompile">
     <ItemGroup>
