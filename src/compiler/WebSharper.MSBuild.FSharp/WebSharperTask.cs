@@ -30,6 +30,8 @@ namespace WebSharper.MSBuild.FSharp
     public sealed class WebSharperTask : ToolTask
     {
         public ITaskItem[] FscCommandLineArgs { get; set; } = new ITaskItem[] { };
+        public string OutputRefAssembly { get; set; }
+        public ITaskItem[] ResolvedProjectReferencePaths { get; set; } = new ITaskItem[] { };
         public string Configuration { get; set; } = "";
         public string MSBuildProjectFullPath { get; set; }
         public string WebProjectOutputDir { get; set; }
@@ -68,6 +70,11 @@ namespace WebSharper.MSBuild.FSharp
 
                 foreach (var a in FscCommandLineArgs)
                     WriteIfSet(w, "", a);
+
+                WriteIfSet(w, "--refout:", OutputRefAssembly);
+
+                foreach (var a in ResolvedProjectReferencePaths)
+                    WriteIfSet(w, "--rr:", a);
 
                 WriteIfSet(w, "--ws:", WebSharperProject);
 

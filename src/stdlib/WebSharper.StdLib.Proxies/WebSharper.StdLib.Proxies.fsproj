@@ -3,6 +3,7 @@
     <TargetFramework>net9.0</TargetFramework>
     <WebSharperProject>Library</WebSharperProject>
     <DisableImplicitFSharpCoreReference>True</DisableImplicitFSharpCoreReference>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DebugType>None</DebugType>
   </PropertyGroup>

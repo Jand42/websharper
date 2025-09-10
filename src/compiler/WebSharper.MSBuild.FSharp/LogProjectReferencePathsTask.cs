@@ -34,20 +34,26 @@ namespace WebSharper.MSBuild.FSharp
 
         public ITaskItem[] ResolvedProjectReferencePaths { get; set; } = new ITaskItem[] { };
 
-        public void LogTaskItem (ITaskItem item)
+        public ITaskItem[] ProjectReferencePaths { get; set; } = new ITaskItem[] { };
+
+        public void LogTaskItem (string typ, ITaskItem item)
         {
-            Console.WriteLine(item.ToString());
+            Log.LogMessage(MessageImportance.High, $"{typ}: {item.ItemSpec}");
         }
 
         public override bool Execute()
         {
             foreach (var item in ResolvedNativeProjectReferencePaths)
             {
-                LogTaskItem(item);
+                LogTaskItem("Resolved Native Project Reference Path", item);
             }
             foreach (var item in ResolvedProjectReferencePaths)
             {
-                LogTaskItem(item);
+                LogTaskItem("Resolved Project Reference Path", item);
+            }
+            foreach (var item in ProjectReferencePaths)
+            {
+                LogTaskItem("Project Reference Path", item);
             }
             return true;
         }

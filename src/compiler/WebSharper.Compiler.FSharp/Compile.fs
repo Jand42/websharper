@@ -518,6 +518,7 @@ let ParseOptions (argv: string[]) (logger: LoggerBase) =
     
     let wsArgs = ref WsConfig.Empty
     let warn = ref WarnSettings.Default
+    let resRefs = ResizeArray()
     let refs = ResizeArray()
     let resources = ResizeArray()
     let fscArgs = ResizeArray()
@@ -569,6 +570,8 @@ let ParseOptions (argv: string[]) (logger: LoggerBase) =
         | StartsWith "-r:" r | StartsWith "--reference:" r ->
             refs.Add r
             fscArgs.Add a
+        | StartsWith "--rr:" r ->
+            resRefs.Add r
         | "--debug" | "--debug+" | "--debug:full" | "-g" | "-g+" | "-g:full" ->
             wsArgs := { !wsArgs with IsDebug = true }
             fscArgs.Add a
@@ -604,7 +607,7 @@ let ParseOptions (argv: string[]) (logger: LoggerBase) =
             fscArgs.Add a  
     wsArgs := 
         { !wsArgs with 
-            References = refs |> Seq.distinct |> Array.ofSeq
+            References = Seq.append resRefs refs |> Seq.distinctBy Path.GetFileName |> Array.ofSeq
             Resources = resources.ToArray()
             CompilerArgs = fscArgs.ToArray() 
         }

@@ -46,13 +46,20 @@
     </ItemGroup>
   </Target>
   
-  <UsingTask AssemblyFile="$(WebSharperTaskAssembly)" TaskName="WebSharper.MSBuild.FSharp.LogProjectReferencePathsTask" />
-  <Target Name="LogProjectReferencePaths" AfterTargets="ResolveProjectReferences" BeforeTargets="CoreCompile">
+  <!--<UsingTask AssemblyFile="$(WebSharperTaskAssembly)" TaskName="WebSharper.MSBuild.FSharp.LogProjectReferencePathsTask" />
+  <Target Name="LogProjectReferencePaths" AfterTargets="ResolveProjectReferences">
     <LogProjectReferencePathsTask
       ResolvedNativeProjectReferencePaths="@(_ResolvedNativeProjectReferencePaths)"
       ResolvedProjectReferencePaths="@(_ResolvedProjectReferencePaths)"
+      ProjectReferencePaths="@(ProjectReferencePaths)"
     />
   </Target>
+
+  <Target Name="PersistResolvedProjectReferencePaths" AfterTargets="ResolveProjectReferences">
+    <ItemGroup>
+      <OriginalResolvedProjectReferencePaths Include="@(_ResolvedProjectReferencePaths)" />
+    </ItemGroup> 
+  </Target>-->
 
   <UsingTask AssemblyFile="$(WebSharperTaskAssembly)" TaskName="WebSharper.MSBuild.FSharp.ReorderCompileItemsTask" Condition=" '$(DesignTimeBuild)' == 'true' " />
   <Target Name="ReorderWebSharperGeneratedFiles" Condition=" '$(DesignTimeBuild)' == 'true' " BeforeTargets="CoreCompile">
@@ -70,6 +77,8 @@
     <Exec Command="chmod u+x '$(WebSharperToolPath)'" Condition="'$(OS)' != 'Windows_NT'" />
     <WebSharperTask
       FscCommandLineArgs="@(FscCommandLineArgs)"
+      OutputRefAssembly="@(IntermediateRefAssembly)"
+      ResolvedProjectReferencePaths="@(_ResolvedProjectReferencePaths)"
       Configuration="$(Configuration)"
       MSBuildProjectFullPath="$(MSBuildProjectFullPath)"
       WebProjectOutputDir="$(WebProjectOutputDir)"
